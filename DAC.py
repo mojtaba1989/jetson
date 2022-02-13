@@ -245,7 +245,7 @@ class sensor_read:
                     for object in self.cameraLeftObjList:
                         print("Saving %d out of %d" % (object.index,
                                                        self.cameraLeftObjList.__len__()), end="")
-                        filename = "Figures-left-camera/img_left_%d.jpg" % object.index
+                        filename = "/Figures-left-camera/img_left_%d.jpg" % object.index
                         if object.data_is_ok:
                             writer.writerow([
                                 object.time,
@@ -270,7 +270,7 @@ class sensor_read:
                     for object in self.cameraRightObjList:
                         print("Saving %d out of %d" % (object.index,
                                                        self.cameraRightObjList.__len__()), end="")
-                        filename = "Figures-right-camera/img_right_%d.jpg" % object.index
+                        filename = "/Figures-right-camera/img_right_%d.jpg" % object.index
                         if object.data_is_ok:
                             writer.writerow([
                                 object.time,
@@ -288,9 +288,9 @@ class sensor_read:
                     print("\nSuccessful")
 
     def displayAll(self):
-        left_image = self.cameraLeftObjList[-1].data if self.cameraLeftObjList[-1].data_is_ok else self.blankImg
-        right_image = self.cameraRightObjList[-1].data if self.cameraRightObjList[-1].data_is_ok else self.blankImg
-        if self.radarLeftObjList[-1].data_is_ok:
+        left_image = self.cameraLeftObjList[-1].data if self.cameraLeftObjList and self.cameraLeftObjList[-1].data_is_ok else self.blankImg
+        right_image = self.cameraRightObjList[-1].data if self.cameraRightObjList and self.cameraRightObjList[-1].data_is_ok else self.blankImg
+        if self.radarLeftObjLest and self.radarLeftObjList[-1].data_is_ok:
             fig = plt.figure()
             plt.scatter(
                 self.radarLeftObjList[-1].data["x"],
@@ -307,7 +307,7 @@ class sensor_read:
                                     interpolation=cv2.INTER_AREA)
         else:
             left_radar = self.blankImg
-        if self.radarRightObjList[-1].data_is_ok:
+        if self.radarLeftObjLest and self.radarRightObjList[-1].data_is_ok:
             fig = plt.figure()
             plt.scatter(
                 self.radarRightObjList[-1].data["x"],
