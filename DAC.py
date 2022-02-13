@@ -111,6 +111,13 @@ class sensor_read:
                         )
                     )
                     self.sensorList.append(self.right_camera)
+                    self.blankImg = cv2.resize(
+                        self.blankImg,
+                        (int(splitWords[6]),
+                         int(splitWords[7])),
+                        interpolation=cv2.INTER_AREA
+                    )
+                    self.blankImgshape = self.blankImg.shape
             elif "radar" in splitWords[0] and int(splitWords[1]):
                 if not int(splitWords[2]):
                     self.left_radar = driver = awr1642(
@@ -245,7 +252,7 @@ class sensor_read:
                     for object in self.cameraLeftObjList:
                         print("Saving %d out of %d" % (object.index,
                                                        self.cameraLeftObjList.__len__()), end="")
-                        filename = "/Figures-left-camera/img_left_%d.jpg" % object.index
+                        filename = self.dirPath+ "/Figures-left-camera/img_left_%d.jpg" % object.index
                         if object.data_is_ok:
                             writer.writerow([
                                 object.time,
@@ -270,7 +277,7 @@ class sensor_read:
                     for object in self.cameraRightObjList:
                         print("Saving %d out of %d" % (object.index,
                                                        self.cameraRightObjList.__len__()), end="")
-                        filename = "/Figures-right-camera/img_right_%d.jpg" % object.index
+                        filename = self.dirPath+"/Figures-right-camera/img_right_%d.jpg" % object.index
                         if object.data_is_ok:
                             writer.writerow([
                                 object.time,
