@@ -164,10 +164,10 @@ class sensor_read:
             pass
 
     def loopCycleControl(self, start_time):
-        if time.time()-start_time > 1/self.sampling:
+        if time.time()-start_time < 1/self.sampling:
             time.sleep(1/self.sampling +
                        start_time -time.time())
-        elif time.time()-start_time < 1/self.sampling:
+        elif time.time()-start_time > 1/self.sampling:
             print("[WARNING] High sampling rate")
 
     def readAll(self):
