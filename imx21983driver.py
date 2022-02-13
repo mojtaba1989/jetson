@@ -79,7 +79,7 @@ class CSI_Camera:
 
     def read(self):
         with self.read_lock:
-            frame = self.frame.copy()
+            frame = self.frame
             grabbed = self.grabbed
         return grabbed, frame
 
