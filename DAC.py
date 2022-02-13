@@ -1,4 +1,3 @@
-import psutil
 import cv2
 import threading
 import numpy as np
@@ -13,7 +12,6 @@ import matplotlib.pyplot as plt
 from imx21983driver import CSI_Camera, gstreamer_pipeline
 from awr1642driver  import awr1642
 
-dict(psutil.virtual_memory()._asdict())
 
 class sensor_read:
     def __init__(self, configFileName):
@@ -61,7 +59,7 @@ class sensor_read:
     def setDirectories(self):
         try:
             self.dirName = strftime("%d-%b-%Y-%H-%M", localtime())
-            os.makedirs(self.dirname)
+            os.makedirs(self.dirName)
             self.dirPath += '/' + self.dirName
             os.chdir(self.dirPath)
             if self.left_camera:
@@ -305,7 +303,7 @@ class sensor_read:
             left_radar = left_radar.reshape(fig.canvas.get_width_height()[::-1] + (3,))
             left_radar = cv2.cvtColor(left_radar, cv2.COLOR_RGB2BGR)
             left_radar = cv2.resize(left_radar,
-                                    self.blankImgshape[:2],
+                                    (self.blankImgshape[1], self.blankImgshape[0]),
                                     interpolation=cv2.INTER_AREA)
         else:
             left_radar = self.blankImg
@@ -322,7 +320,7 @@ class sensor_read:
             right_radar = right_radar.reshape(fig.canvas.get_width_height()[::-1] + (3,))
             right_radar = cv2.cvtColor(right_radar, cv2.COLOR_RGB2BGR)
             right_radar = cv2.resize(right_radar,
-                                    self.blankImgshape[:2],
+                                    (self.blankImgshape[1], self.blankImgshape[0]),
                                     interpolation=cv2.INTER_AREA)
         else:
             right_radar = self.blankImg
@@ -340,7 +338,7 @@ class sensor_read:
                 and all([sensor.isOpened for sensor in self.sensorList]):
             if not self.display:
                 try:
-                    while psutil.virtual_memory().percent < 90:
+                    while True:
                         start_time = time.time()
                         self.readAll()
                         self.loopCycleControl(start_time)
@@ -353,7 +351,7 @@ class sensor_read:
                     self.saveAll() if self.save else None
             else:
                 try:
-                    while psutil.virtual_memory().percent < 90:
+                    while True:
                         start_time = time.time()
                         self.readAll()
                         self.displayAll()
