@@ -120,28 +120,34 @@ class sensor_read:
                     self.blankImgshape = self.blankImg.shape
             elif "radar" in splitWords[0] and int(splitWords[1]):
                 if not int(splitWords[2]):
-                    self.left_radar = driver = awr1642(
+                    self.left_radar = awr1642(
                         splitWords[5],
                         splitWords[3],
                         splitWords[4],
                         'left_radar'
                     )
                     self.left_radar.sensorSetup()
+                    time.sleep(.01)
                     if self.sampling:
                         self.left_radar.setSampleRate(self.sampling)
+                        time.sleep(.01)
                     self.left_radar.open()
+                    time.sleep(.01)
                     self.sensorList.append(self.left_radar)
                 else:
-                    self.right_radar = driver = awr1642(
+                    self.right_radar = awr1642(
                         splitWords[5],
                         splitWords[3],
                         splitWords[4],
                         'right_radar'
                     )
                     self.right_radar.sensorSetup()
+                    time.sleep(.01)
                     if self.sampling:
                         self.right_radar.setSampleRate(self.sampling)
+                        time.sleep(.01)
                     self.right_radar.open()
+                    time.sleep(.01)
                     self.sensorList.append(self.right_radar)
             elif "output" in splitWords[0]:
                 self.save = int(splitWords[1])
@@ -377,7 +383,7 @@ class sensor_read:
                     self.saveAll() if self.save else None
         else:
             print("[ERROR] Not all sensors have been opened correctly")
-            self.closeALL()
+            self.closeAll()
 
 if __name__ == "__main__":
     target = sensor_read("dacProfile.cfg")
