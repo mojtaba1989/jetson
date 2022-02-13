@@ -244,8 +244,8 @@ class sensor_read:
                     writer.writerow(camera_header)
                     for object in self.cameraLeftObjList:
                         print("Saving %d out of %d" % (object.index,
-                                                       self.cameraLeftObjList.__len__()))
-                        filename = "Figures-left-camera/img_left_%d.jpeg" % object.index
+                                                       self.cameraLeftObjList.__len__()), end="")
+                        filename = "Figures-left-camera/img_left_%d.jpg" % object.index
                         if object.data_is_ok:
                             writer.writerow([
                                 object.time,
@@ -269,8 +269,8 @@ class sensor_read:
                     writer.writerow(camera_header)
                     for object in self.cameraRightObjList:
                         print("Saving %d out of %d" % (object.index,
-                                                       self.cameraRightObjList.__len__()))
-                        filename = "Figures-right-camera/img_right_%d.jpeg" % object.index
+                                                       self.cameraRightObjList.__len__()), end="")
+                        filename = "Figures-right-camera/img_right_%d.jpg" % object.index
                         if object.data_is_ok:
                             writer.writerow([
                                 object.time,
