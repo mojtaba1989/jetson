@@ -362,10 +362,6 @@ class sensor_read:
                     self.closeAll()
                     cv2.destroyAllWindows()
                     self.saveAll() if self.save else None
-                finally:
-                    self.closeAll()
-                    cv2.destroyAllWindows()
-                    self.saveAll() if self.save else None
         else:
             print("[ERROR] Not all sensors have been opened correctly")
             self.closeALL()
