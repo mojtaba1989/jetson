@@ -170,12 +170,19 @@ class sensor_read:
         except:
             pass
 
-    def loopCycleControl(self, start_time):
-        if time.time()-start_time < 1/self.sampling:
-            time.sleep(1/self.sampling +
-                       start_time -time.time())
-        elif time.time()-start_time > 1/self.sampling:
-            print("[WARNING] High sampling rate")
+    def loopCycleControl(self, start_time, sleep_enable=1):
+        if sleep_enable:
+            if time.time()-start_time < 1/self.sampling:
+                time.sleep(1/self.sampling +
+                           start_time -time.time())
+            elif time.time()-start_time > 1/self.sampling:
+                print("[WARNING] High sampling rate")
+        else:
+            if time.time()-start_time < 1/self.sampling:
+                reture (1/self.sampling + start_time - time.time()) * 1000
+            elif time.time()-start_time > 1/self.sampling:
+                print("[WARNING] High sampling rate")
+                returen 10
 
     def readAll(self):
         for sensor in self.sensorList:
@@ -294,7 +301,9 @@ class sensor_read:
                         print("", end="\r")
                     print("\nSuccessful")
 
-    def displayAll(self):
+    def displayAll(self, start_time):
+        window_title = "Data Acquisition "
+        cv2.namedWindow(window_title, cv2.WINDOW_AUTOSIZE)
         left_image = self.cameraLeftObjList[-1].data if self.cameraLeftObjList and self.cameraLeftObjList[-1].data_is_ok else self.blankImg
         right_image = self.cameraRightObjList[-1].data if self.cameraRightObjList and self.cameraRightObjList[-1].data_is_ok else self.blankImg
         if self.radarLeftObjList and self.radarLeftObjList[-1].data_is_ok:
@@ -334,7 +343,8 @@ class sensor_read:
         camera_images = np.hstack((left_image, right_image))
         radar_images = np.hstack((left_radar, right_radar))
         final_image = np.vstack((camera_images, radar_images))
-        cv2.imshow("Data Acquisition ", cv2.resize(final_image, (800,600)))
+        cv2.imshow(window_title, cv2.resize(final_image, (800,600)))
+        keyCode = cv2.waitKey(self.loopCycleControl(start_time, sleep_enable=0))
 
     def run(self):
         if self.save:
@@ -359,8 +369,7 @@ class sensor_read:
                     while True:
                         start_time = time.time()
                         self.readAll()
-                        self.displayAll()
-                        self.loopCycleControl(start_time)
+                        self.displayAll(start_time)
                         self.index += 1
                 except KeyboardInterrupt:
                     self.closeAll()
