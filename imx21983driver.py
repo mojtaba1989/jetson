@@ -55,7 +55,7 @@ class CSI_Camera:
             self.running = True
             self.read_thread = threading.Thread(target=self.updateCamera)
             self.read_thread.start()
-            self.isOpen = self.video_capture.isOpened()
+            self.isOpened = self.video_capture.isOpened()
         return self
 
     def stop(self):
