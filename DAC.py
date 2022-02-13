@@ -184,7 +184,7 @@ class sensor_read:
                 ["index", "time", "x", "y", "range", "peakVal", "doppler"]
             camera_header = \
                 ["index", "time", "imageName"]
-            if self.radar_right:
+            if self.right_radar:
                 print("[SAVE] Right RADAR: Creating CSV File", )
                 with open(self.dirPath+'/'+self.dirName+'right-radar.csv','w', newline='')\
                         as outputfile:
@@ -210,7 +210,7 @@ class sensor_read:
                             ])
                         print("", end="\r")
                     print("\nSuccessful")
-            if self.radar_left:
+            if self.left_radar:
                 print("[SAVE] Left RADAR: Creating CSV File", )
                 with open(self.dirPath+'/'+self.dirName+'left-radar.csv', 'w', newline='')\
                         as outputfile:
