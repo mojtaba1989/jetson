@@ -36,7 +36,7 @@ class sensor_read:
         self.save = 0
         self.index = 0
         self.sampling = None
-        self.blankImg = cv2.imread('/NoSignal.jpg', cv2.IMREAD_UNCHANGED)
+        self.blankImg = cv2.imread('NoSignal.jpg', cv2.IMREAD_UNCHANGED)
         self.blankImgshape = self.blankImg.shape
 
     class objCreate:
@@ -334,6 +334,7 @@ class sensor_read:
             self.setDirectories()
         for sensor in self.sensorList:
             sensor.start()
+            print(sensor, sensor.sensorID, sensor.isOpened)
         if self.sensorList \
                 and all([sensor.isOpened for sensor in self.sensorList]):
             if not self.display:
@@ -367,6 +368,7 @@ class sensor_read:
                     self.saveAll() if self.save else None
         else:
             print("[ERROR] Not all sensors have been opened correctly")
+            quit()
 
 if __name__ == "__main__":
     target = sensor_read("dacProfile.cfg")
