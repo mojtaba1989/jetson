@@ -368,7 +368,7 @@ class sensor_read:
                     self.saveAll() if self.save else None
         else:
             print("[ERROR] Not all sensors have been opened correctly")
-            quit()
+            self.closeALL()
 
 if __name__ == "__main__":
     target = sensor_read("dacProfile.cfg")
