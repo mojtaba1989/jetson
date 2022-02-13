@@ -43,7 +43,7 @@ class sensor_read:
         def __init__(self, index, data, data_is_ok=0):
             self.time = time.time()
             self.index = index
-            self.image = data
+            self.data = data
             self.data_is_ok = data_is_ok
 
     def append(self, obj, sensor_id):
