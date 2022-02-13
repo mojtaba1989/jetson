@@ -179,10 +179,10 @@ class sensor_read:
                 print("[WARNING] High sampling rate")
         else:
             if time.time()-start_time < 1/self.sampling:
-                reture (1/self.sampling + start_time - time.time()) * 1000
+                return int((1/self.sampling + start_time - time.time()) * 1000)
             elif time.time()-start_time > 1/self.sampling:
                 print("[WARNING] High sampling rate")
-                returen 10
+                return 10
 
     def readAll(self):
         for sensor in self.sensorList:
