@@ -347,9 +347,6 @@ class sensor_read:
                 except KeyboardInterrupt:
                     self.closeAll()
                     self.saveAll() if self.save else None
-                finally:
-                    self.closeAll()
-                    self.saveAll() if self.save else None
             else:
                 try:
                     while True:
