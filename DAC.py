@@ -174,7 +174,7 @@ class sensor_read:
         for sensor in self.sensorList:
             grabbed, data = sensor.read()
             self.append(self.objCreate(
-                self.Index,
+                self.index,
                 data, grabbed),
                 sensor.sensorID)
 
