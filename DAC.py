@@ -252,7 +252,7 @@ class sensor_read:
                     for object in self.cameraLeftObjList:
                         print("Saving %d out of %d" % (object.index,
                                                        self.cameraLeftObjList.__len__()), end="")
-                        filename = self.dirPath+ "/Figures-left-camera/img_left_%d.jpg" % object.index
+                        filename = "Figure-left-camera/img_left_%d.jpg" % object.index
                         if object.data_is_ok:
                             writer.writerow([
                                 object.time,
@@ -277,7 +277,7 @@ class sensor_read:
                     for object in self.cameraRightObjList:
                         print("Saving %d out of %d" % (object.index,
                                                        self.cameraRightObjList.__len__()), end="")
-                        filename = self.dirPath+"/Figures-right-camera/img_right_%d.jpg" % object.index
+                        filename = "Figure-right-camera/img_right_%d.jpg" % object.index
                         if object.data_is_ok:
                             writer.writerow([
                                 object.time,
@@ -334,7 +334,7 @@ class sensor_read:
         camera_images = np.hstack((left_image, right_image))
         radar_images = np.hstack((left_radar, right_radar))
         final_image = np.vstack((camera_images, radar_images))
-        cv2.imshow("Data Acquisition ", final_image, cv2.WINDOW_NORMAL)
+        cv2.imshow("Data Acquisition ", cv2.resize(final_image, (800,600)))
 
     def run(self):
         if self.save:
