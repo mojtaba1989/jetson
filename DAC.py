@@ -290,7 +290,7 @@ class sensor_read:
     def displayAll(self):
         left_image = self.cameraLeftObjList[-1].data if self.cameraLeftObjList and self.cameraLeftObjList[-1].data_is_ok else self.blankImg
         right_image = self.cameraRightObjList[-1].data if self.cameraRightObjList and self.cameraRightObjList[-1].data_is_ok else self.blankImg
-        if self.radarLeftObjLest and self.radarLeftObjList[-1].data_is_ok:
+        if self.radarLeftObjList and self.radarLeftObjList[-1].data_is_ok:
             fig = plt.figure()
             plt.scatter(
                 self.radarLeftObjList[-1].data["x"],
@@ -307,7 +307,7 @@ class sensor_read:
                                     interpolation=cv2.INTER_AREA)
         else:
             left_radar = self.blankImg
-        if self.radarLeftObjLest and self.radarRightObjList[-1].data_is_ok:
+        if self.radarLeftObjList and self.radarRightObjList[-1].data_is_ok:
             fig = plt.figure()
             plt.scatter(
                 self.radarRightObjList[-1].data["x"],
