@@ -48,7 +48,7 @@ def heatmap(xr, yr, zr, xlim, ylim, xc=np.nan, yc=np.nan, xbinnum=100, ybinnum=1
             except:
                 pass
 
-            tab = tab.reshape(xbinnum, ybinnum, 1).dtype(np.uint8)
+            tab = tab.reshape((xbinnum, ybinnum, 1)).astype(np.uint8)
             img = cv2.cvtColor(tab, cv2.COLOR_GRAY2BGR)
 
             return img
