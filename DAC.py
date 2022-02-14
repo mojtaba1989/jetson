@@ -354,8 +354,8 @@ class sensor_read:
                 fig = plt.figure()    
                 fig, axes = plt.subplots(nrows = 1, ncols = 2, sharex=True, sharey = True)
                 x, y = [],[]
-                sc1 = ax[0][0].scatter(x,y)
-                sc2 = ax[0][1].scatter(x,y)
+                sc1 = axes[0][0].scatter(x,y)
+                sc2 = axes[0][1].scatter(x,y)
                 plt.draw()
                 try:
                     while True:
