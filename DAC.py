@@ -361,7 +361,7 @@ class sensor_read:
             plt.scatter(x, y, s=50, c=z, cmap='gray')
             plt.savefig('img.png')
             plt.close()
-            img = imread('img.png')
+            img = cv2.imread('img.png')
             left_radar = cv2.resize(img,
                                     (self.blankImgshape[1], self.blankImgshape[0]),
                                     interpolation=cv2.INTER_AREA)
@@ -374,7 +374,7 @@ class sensor_read:
             plt.scatter(x, y, s=50, c=z, cmap='gray')
             plt.savefig('img.png')
             plt.close()
-            img = imread('img.png')
+            img = cv2.imread('img.png')
             right_radar = cv2.resize(img,
                                      (self.blankImgshape[1], self.blankImgshape[0]),
                                      interpolation=cv2.INTER_AREA)
