@@ -11,7 +11,7 @@ import sys
 from imx21983driver import CSI_Camera, gstreamer_pipeline
 from awr1642driver  import awr1642
 
-def heat_map(xr, yr, zr, xlim, ylim, xc=np.nan, yc=np.nan, xbinnum=100, ybinnum=100):
+def heatmap(xr, yr, zr, xlim, ylim, xc=np.nan, yc=np.nan, xbinnum=100, ybinnum=100):
 
         x_edges = np.linspace(xlim[0], xlim[1], xbinnum)
         y_edges = np.linspace(ylim[0], ylim[1], ybinnum)
@@ -361,7 +361,7 @@ class sensor_read:
             z = self.radarLeftObjList[-1].data["peakVal"]
             img = heatmap(x, y , z, (-5,5), (0, 10))
             left_radar = cv2.resize(img,
-                                    (self.blankImgshape[1], self.blankImgshape[0])
+                                    (self.blankImgshape[1], self.blankImgshape[0]),
                                     interpolation=cv2.INTER_AREA)
         else:
             left_radar = self.blankImg
@@ -371,7 +371,7 @@ class sensor_read:
             z = self.radarRightObjList[-1].data["peakVal"]
             img = heatmap(x, y , z, (-5,5), (0, 10))
             right_radar = cv2.resize(img,
-                                    (self.blankImgshape[1], self.blankImgshape[0])
+                                    (self.blankImgshape[1], self.blankImgshape[0]),
                                     interpolation=cv2.INTER_AREA)
         else:
             right_radar = self.blankImg
