@@ -358,9 +358,10 @@ class sensor_read:
             x = self.radarLeftObjList[-1].data["x"]
             y = self.radarLeftObjList[-1].data["y"]
             z = self.radarLeftObjList[-1].data["peakVal"]
-            plt.scatter(x, y, s=50, c=z, cmap='gray')
+            plt.scatter(x, y, s=50, c=zz, cmap='gray')
             plt.savefig('img.png')
-            img = cv2.imread('img.png')
+            plt.close()
+            img = imread('img.png')
             left_radar = cv2.resize(img,
                                     (self.blankImgshape[1], self.blankImgshape[0]),
                                     interpolation=cv2.INTER_AREA)
@@ -370,9 +371,10 @@ class sensor_read:
             x = self.radarRightObjList[-1].data["x"]
             y = self.radarRightObjList[-1].data["y"]
             z = self.radarRightObjList[-1].data["peakVal"]
-            plt.scatter(x, y, s=50, c=z, cmap='gray')
+            plt.scatter(x, y, s=50, c=zz, cmap='gray')
             plt.savefig('img.png')
-            img = cv2.imread('img.png')
+            plt.close()
+            img = imread('img.png')
             right_radar = cv2.resize(img,
                                      (self.blankImgshape[1], self.blankImgshape[0]),
                                      interpolation=cv2.INTER_AREA)
