@@ -307,29 +307,47 @@ class sensor_read:
                         print("", end="\r")
                     print("\nSuccessful")
 
-    def displayAll(self, start_time, fig, sc1, sc2):
+    def displayAll(self, start_time, fig):
         window_title = "Data Acquisition "
         cv2.namedWindow(window_title, cv2.WINDOW_AUTOSIZE)
         left_image = self.cameraLeftObjList[-1].data if self.cameraLeftObjList and self.cameraLeftObjList[-1].data_is_ok else self.blankImg
         right_image = self.cameraRightObjList[-1].data if self.cameraRightObjList and self.cameraRightObjList[-1].data_is_ok else self.blankImg
         if self.radarLeftObjList and self.radarLeftObjList[-1].data_is_ok:
-            x = self.radarLeftObjList[-1].data["x"]
-            y = self.radarLeftObjList[-1].data["y"]
-            sc1.set_offsets(np.c_[x,y])
-            fig1.canvas.draw_idle()
+            plt.scatter(
+                self.radarRightObjList[-1].data["x"],
+                self.radarRightObjList[-1].data["y"],
+                s=200,
+                c=self.radarRightObjList[-1].data["peakVal"],
+                cmap='gray')
+            fig.canvas.draw()
+            plt.pause(0.001)
+            right_radar = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
+            right_radar = right_radar.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            fig.canvas.flush_events()
+            right_radar = cv2.cvtColor(right_radar, cv2.COLOR_RGB2BGR)
+            right_radar = cv2.resize(right_radar,
+                                    self.blankImgshape[:2],
+                                    interpolation=cv2.INTER_AREA)
         else:
             left_radar = self.blankImg
         if self.radarRightObjList and self.radarRightObjList[-1].data_is_ok:
-            x = self.radarRightObjList[-1].data["x"]
-            y = self.radarRightObjList[-1].data["y"]
-            sc2.set_offsets(np.c_[x,y])
-            fig2.canvas.draw_idle()
+            plt.scatter(
+                self.radarRightObjList[-1].data["x"],
+                self.radarRightObjList[-1].data["y"],
+                s=200,
+                c=self.radarRightObjList[-1].data["peakVal"],
+                cmap='gray')
+            fig.canvas.draw()
+            plt.pause(0.001)
+            right_radar = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
+            right_radar = right_radar.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            fig.canvas.flush_events()
         else:
             right_radar = self.blankImg
         camera_images = np.hstack((left_image, right_image))
+        radar_images = np.hstack((left_radar, right_radar))
         final_image = np.vstack((camera_images, radar_images))
-        cv2.imshow(window_title, cv2.resize(final_image, (800,300)))
-        keyCode = cv2.waitKey(self.loopCycleControl(start_time, sleep_enable=0))
+        cv2.imshow("Data Acquisition ", final_image, cv2.WINDOW_NORMAL)
 
     def run(self):
         if self.save:
@@ -351,12 +369,7 @@ class sensor_read:
                     self.saveAll() if self.save else None
             else:
                 plt.ion()
-                fig1, axes1 = plt.subplots()
-                fig2, axes2 = plt.subplots()
-                x, y = [],[]
-                sc1 = axes1.scatter(x,y)
-                sc2 = axes2.scatter(x,y)
-                plt.draw()
+                fig = plt.figure()
                 try:
                     while True:
                         start_time = time.time()
