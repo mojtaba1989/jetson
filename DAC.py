@@ -316,14 +316,14 @@ class sensor_read:
             x = self.radarLeftObjList[-1].data["x"]
             y = self.radarLeftObjList[-1].data["y"]
             sc1.set_offsets(np.c_[x,y])
-            fig.canvas.draw_idle()
+            fig1.canvas.draw_idle()
         else:
             left_radar = self.blankImg
         if self.radarRightObjList and self.radarRightObjList[-1].data_is_ok:
             x = self.radarRightObjList[-1].data["x"]
             y = self.radarRightObjList[-1].data["y"]
             sc2.set_offsets(np.c_[x,y])
-            fig.canvas.draw_idle()
+            fig2.canvas.draw_idle()
         else:
             right_radar = self.blankImg
         camera_images = np.hstack((left_image, right_image))
@@ -351,17 +351,17 @@ class sensor_read:
                     self.saveAll() if self.save else None
             else:
                 plt.ion()
-                fig = plt.figure()    
-                fig, axes = plt.subplots(nrows = 1, ncols = 2, sharex=True, sharey = True)
+                fig1, axes1 = plt.subplots()
+                fig2, axes2 = plt.subplots()
                 x, y = [],[]
-                sc1 = axes[0][0].scatter(x,y)
-                sc2 = axes[0][1].scatter(x,y)
+                sc1 = axes1.scatter(x,y)
+                sc2 = axes2.scatter(x,y)
                 plt.draw()
                 try:
                     while True:
                         start_time = time.time()
                         self.readAll()
-                        self.displayAll(start_time, fig, sc1, sc2)
+                        self.displayAll(start_time, fig1, fig2, sc1, sc2)
                         self.index += 1
                 except KeyboardInterrupt:
                     self.closeAll()
