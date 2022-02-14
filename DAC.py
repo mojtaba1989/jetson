@@ -358,7 +358,7 @@ class sensor_read:
             x = self.radarLeftObjList[-1].data["x"]
             y = self.radarLeftObjList[-1].data["y"]
             z = self.radarLeftObjList[-1].data["peakVal"]
-            plt.scatter(x, y, s=50, c=zz, cmap='gray')
+            plt.scatter(x, y, s=50, c=z, cmap='gray')
             plt.savefig('img.png')
             plt.close()
             img = imread('img.png')
@@ -371,7 +371,7 @@ class sensor_read:
             x = self.radarRightObjList[-1].data["x"]
             y = self.radarRightObjList[-1].data["y"]
             z = self.radarRightObjList[-1].data["peakVal"]
-            plt.scatter(x, y, s=50, c=zz, cmap='gray')
+            plt.scatter(x, y, s=50, c=z, cmap='gray')
             plt.savefig('img.png')
             plt.close()
             img = imread('img.png')
