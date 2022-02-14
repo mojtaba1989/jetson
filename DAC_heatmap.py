@@ -41,7 +41,7 @@ def heatmap(xr, yr, zr, xlim, ylim, xc=np.nan, yc=np.nan, xbinnum=100, ybinnum=1
         tab = np.zeros([xbinnum, ybinnum])
 
         for i in range(len(xr)):
-            tab[np.where(x_edges == xr[i]), np.where(y_edges == yr[i])] = + np.log10(1+zr[i])
+            tab[np.where(x_edges == xr[i]), np.where(y_edges == yr[i])] = + zr[i]
 
         try:
             for i in range(len(xc)):
@@ -360,7 +360,7 @@ class sensor_read:
             x = self.radarLeftObjList[-1].data["x"]
             y = self.radarLeftObjList[-1].data["y"]
             z = self.radarLeftObjList[-1].data["peakVal"]
-            img = heatmap(x, y, z, (-5, 5), (0, 10))
+            img = heatmap(x, y, z, (-2, 2), (0, 4))
             left_radar = cv2.resize(img,
                                     (self.blankImgshape[1], self.blankImgshape[0]),
                                     interpolation=cv2.INTER_AREA)
@@ -370,7 +370,7 @@ class sensor_read:
             x = self.radarRightObjList[-1].data["x"]
             y = self.radarRightObjList[-1].data["y"]
             z = self.radarRightObjList[-1].data["peakVal"]
-            img = heatmap(x, y, z, (-5, 5), (0, 10))
+            img = heatmap(x, y, z, (-2, 2), (0, 4))
             right_radar = cv2.resize(img,
                                      (self.blankImgshape[1], self.blankImgshape[0]),
                                      interpolation=cv2.INTER_AREA)
