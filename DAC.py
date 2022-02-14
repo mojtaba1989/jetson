@@ -12,6 +12,50 @@ import matplotlib.pyplot as plt
 from imx21983driver import CSI_Camera, gstreamer_pipeline
 from awr1642driver  import awr1642
 
+def heat_map(xr, yr, zr, xlim, ylim, xc=np.nan, yc=np.nan, xbinnum=100, ybinnum=100):
+
+        x_edges = np.linspace(xlim[0], xlim[1], xbinnum)
+        y_edges = np.linspace(ylim[0], ylim[1], ybinnum)
+
+        try:
+            valid_list = np.logical_and(
+                np.logical_and(xr >= xlim[0], xr <= xlim[1]),
+                np.logical_and(yr >= ylim[0], yr <= ylim[1]))
+
+            xr = xr[valid_list]
+            yr = yr[valid_list]
+            zr = zr[valid_list]
+
+            indx = np.digitize(xr, x_edges)
+            indy = np.digitize(yr, y_edges)
+
+            xr = x_edges[indx - 1]
+            yr = y_edges[indy - 1]
+
+            indx = np.digitize(xc, x_edges)
+            indy = np.digitize(yc, y_edges)
+
+            xc = x_edges[indx - 1]
+            yc = y_edges[indy - 1]
+
+            tab = np.zeros([xbinnum, ybinnum])
+
+            for i in range(len(xr)):
+                tab[np.where(x_edges == xr[i]), np.where(y_edges == yr[i])] = + zr[i]
+
+            try:
+                for i in range(len(xc)):
+                    tab[np.where(x_edges == xc[i]), np.where(y_edges == yc[i])] = + 1
+            except:
+                pass
+
+            tab = tab.reshape(xbinnum, ybinnum, 1).dtype(np.uint8)
+            img = cv2.cvtColor(tab, cv2.COLOR_GRAY2BGR)
+
+            return img
+        except:
+            pass
+
 
 class sensor_read:
     def __init__(self, configFileName):
@@ -315,24 +359,27 @@ class sensor_read:
         if self.radarLeftObjList and self.radarLeftObjList[-1].data_is_ok:
             x = self.radarLeftObjList[-1].data["x"]
             y = self.radarLeftObjList[-1].data["y"]
-            sc.set_offsets([x,y])
-            fig.canvas.draw_idle()
-            plt.pause(0.001)
+            z = self.radarLeftObjList[-1].data["peakVal"]
+            img = heatmap(x, y , z, (-5,5), (0, 10))
+            left_radar = cv2.resize(img,
+                                    (self.blankImgshape[1], self.blankImgshape[0])
+                                    interpolation=cv2.INTER_AREA)
         else:
             left_radar = self.blankImg
         if self.radarRightObjList and self.radarRightObjList[-1].data_is_ok:
             x = self.radarRightObjList[-1].data["x"]
             y = self.radarRightObjList[-1].data["y"]
-            sc.set_offsets([x,y])
-            fig.canvas.draw_idle()
-            plt.pause(0.001)
-#             fig.canvas.flush_events()
+            z = self.radarRightObjList[-1].data["peakVal"]
+            img = heatmap(x, y , z, (-5,5), (0, 10))
+            right_radar = cv2.resize(img,
+                                    (self.blankImgshape[1], self.blankImgshape[0])
+                                    interpolation=cv2.INTER_AREA)
         else:
             right_radar = self.blankImg
         camera_images = np.hstack((left_image, right_image))
-#         radar_images = np.hstack((left_radar, right_radar))
-#         final_image = np.vstack((camera_images, radar_images))
-        cv2.imshow("Data Acquisition ", camera_images)
+        radar_images = np.hstack((left_radar, right_radar))
+        final_image = np.vstack((camera_images, radar_images))
+        cv2.imshow("Data Acquisition ", cv2.resize(final_image, (800, 600)))
 
     def run(self):
         if self.save:
