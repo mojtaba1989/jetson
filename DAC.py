@@ -327,6 +327,7 @@ class sensor_read:
             left_radar = cv2.resize(left_radar,
                                     (self.blankImgshape[1], self.blankImgshape[0]),
                                     interpolation=cv2.INTER_AREA)
+            plt.close(fig)
         else:
             left_radar = self.blankImg
         if self.radarLeftObjList and self.radarRightObjList[-1].data_is_ok:
@@ -344,6 +345,7 @@ class sensor_read:
             right_radar = cv2.resize(right_radar,
                                     (self.blankImgshape[1], self.blankImgshape[0]),
                                     interpolation=cv2.INTER_AREA)
+            plt.close(fig)
         else:
             right_radar = self.blankImg
         camera_images = np.hstack((left_image, right_image))
