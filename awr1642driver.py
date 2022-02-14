@@ -345,6 +345,7 @@ class awr1642:
 
 
     def read(self):
+        self.update()
         dataOK = self.dataOK
         detObj = self.detObj
         return dataOK, detObj
