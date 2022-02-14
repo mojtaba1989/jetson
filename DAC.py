@@ -400,6 +400,7 @@ class sensor_read:
                     self.saveAll() if self.save else None
             else:
                 try:
+                    cv2.namedWindow("Data Acquisition", cv2.WINDOW_AUTOSIZE)
                     while True:
                         start_time = time.time()
                         self.readAll()
