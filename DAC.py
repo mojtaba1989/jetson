@@ -212,7 +212,7 @@ class sensor_read:
                     writer.writerow(radar_header)
                     for object in self.radarRightObjList:
                         print("Saving %d out of %d" %(object.index,
-                                                      self.radarRightObjList.__len__()))
+                                                      self.radarRightObjList.__len__()), end="")
                         if object.data_is_ok:
                             writer.writerow([
                                 object.time,
@@ -238,7 +238,7 @@ class sensor_read:
                     writer.writerow(radar_header)
                     for object in self.radarLeftObjList:
                         print("Saving %d out of %d" % (object.index,
-                                                       self.radarLeftObjList.__len__()))
+                                                       self.radarLeftObjList.__len__()), end="")
                         if object.data_is_ok:
                             writer.writerow([
                                 object.time,
