@@ -13,47 +13,47 @@ from awr1642driver  import awr1642
 
 def heatmap(xr, yr, zr, xlim, ylim, xc=np.nan, yc=np.nan, xbinnum=100, ybinnum=100):
 
-        x_edges = np.linspace(xlim[0], xlim[1], xbinnum)
-        y_edges = np.linspace(ylim[0], ylim[1], ybinnum)
+    x_edges = np.linspace(xlim[0], xlim[1], xbinnum)
+    y_edges = np.linspace(ylim[0], ylim[1], ybinnum)
+
+    try:
+        valid_list = np.logical_and(
+            np.logical_and(xr >= xlim[0], xr <= xlim[1]),
+            np.logical_and(yr >= ylim[0], yr <= ylim[1]))
+
+        xr = xr[valid_list]
+        yr = yr[valid_list]
+        zr = zr[valid_list]
+
+        indx = np.digitize(xr, x_edges)
+        indy = np.digitize(yr, y_edges)
+
+        xr = x_edges[indx - 1]
+        yr = y_edges[indy - 1]
+
+        indx = np.digitize(xc, x_edges)
+        indy = np.digitize(yc, y_edges)
+
+        xc = x_edges[indx - 1]
+        yc = y_edges[indy - 1]
+
+        tab = np.zeros([xbinnum, ybinnum])
+
+        for i in range(len(xr)):
+            tab[np.where(x_edges == xr[i]), np.where(y_edges == yr[i])] = + zr[i]
 
         try:
-            valid_list = np.logical_and(
-                np.logical_and(xr >= xlim[0], xr <= xlim[1]),
-                np.logical_and(yr >= ylim[0], yr <= ylim[1]))
-
-            xr = xr[valid_list]
-            yr = yr[valid_list]
-            zr = zr[valid_list]
-
-            indx = np.digitize(xr, x_edges)
-            indy = np.digitize(yr, y_edges)
-
-            xr = x_edges[indx - 1]
-            yr = y_edges[indy - 1]
-
-            indx = np.digitize(xc, x_edges)
-            indy = np.digitize(yc, y_edges)
-
-            xc = x_edges[indx - 1]
-            yc = y_edges[indy - 1]
-
-            tab = np.zeros([xbinnum, ybinnum])
-
-            for i in range(len(xr)):
-                tab[np.where(x_edges == xr[i]), np.where(y_edges == yr[i])] = + zr[i]
-
-            try:
-                for i in range(len(xc)):
-                    tab[np.where(x_edges == xc[i]), np.where(y_edges == yc[i])] = + 1
-            except:
-                pass
-
-            tab = tab.reshape((xbinnum, ybinnum, 1)).astype(np.uint8)
-            img = cv2.cvtColor(tab, cv2.COLOR_GRAY2BGR)
-
-            return img
+            for i in range(len(xc)):
+                tab[np.where(x_edges == xc[i]), np.where(y_edges == yc[i])] = + 1
         except:
             pass
+
+        tab = tab.reshape((xbinnum, ybinnum, 1)).astype(np.uint8)
+        img = cv2.cvtColor(tab, cv2.COLOR_GRAY2BGR)
+
+        return img
+    except:
+        pass
 
 
 class sensor_read:
@@ -249,13 +249,13 @@ class sensor_read:
                 ["index", "time", "imageName"]
             if self.right_radar:
                 print("[SAVE] Right RADAR: Creating CSV File", )
-                with open(self.dirPath+'/'+self.dirName+'right-radar.csv','w', newline='')\
+                with open(self.dirPath+'/'+self.dirName+'right-radar.csv','w', newline='') \
                         as outputfile:
                     writer = csv.writer(outputfile)
                     writer.writerow(radar_header)
                     for object in self.radarRightObjList:
                         print("Saving %d out of %d" %(object.index,
-                                                      self.radarRightObjList.__len__()), end="")
+                                                      self.radarRightObjList.__len__()))
                         if object.data_is_ok:
                             writer.writerow([
                                 object.time,
@@ -275,13 +275,13 @@ class sensor_read:
                     print("\nSuccessful")
             if self.left_radar:
                 print("[SAVE] Left RADAR: Creating CSV File", )
-                with open(self.dirPath+'/'+self.dirName+'left-radar.csv', 'w', newline='')\
+                with open(self.dirPath+'/'+self.dirName+'left-radar.csv', 'w', newline='') \
                         as outputfile:
                     writer = csv.writer(outputfile)
                     writer.writerow(radar_header)
                     for object in self.radarLeftObjList:
                         print("Saving %d out of %d" % (object.index,
-                                                       self.radarLeftObjList.__len__()), end="")
+                                                       self.radarLeftObjList.__len__()))
                         if object.data_is_ok:
                             writer.writerow([
                                 object.time,
@@ -301,7 +301,7 @@ class sensor_read:
                     print("\nSuccessful")
             if self.left_camera:
                 print("[SAVE] Left Camera: Creating CSV File", )
-                with open(self.dirPath+'/'+self.dirName+'left-camera.csv', 'w', newline='')\
+                with open(self.dirPath+'/'+self.dirName+'left-camera.csv', 'w', newline='') \
                         as outputfile:
                     writer = csv.writer(outputfile)
                     writer.writerow(camera_header)
@@ -350,16 +350,14 @@ class sensor_read:
                         print("", end="\r")
                     print("\nSuccessful")
 
-    def displayAll(self, start_time):
-        window_title = "Data Acquisition "
-        cv2.namedWindow(window_title, cv2.WINDOW_AUTOSIZE)
+    def displayAll(self, start_time, window_title):
         left_image = self.cameraLeftObjList[-1].data if self.cameraLeftObjList and self.cameraLeftObjList[-1].data_is_ok else self.blankImg
         right_image = self.cameraRightObjList[-1].data if self.cameraRightObjList and self.cameraRightObjList[-1].data_is_ok else self.blankImg
         if self.radarLeftObjList and self.radarLeftObjList[-1].data_is_ok:
             x = self.radarLeftObjList[-1].data["x"]
             y = self.radarLeftObjList[-1].data["y"]
             z = self.radarLeftObjList[-1].data["peakVal"]
-            img = heatmap(x, y , z, (-5,5), (0, 10))
+            img = heatmap(x, y, z, (-5, 5), (0, 5))
             left_radar = cv2.resize(img,
                                     (self.blankImgshape[1], self.blankImgshape[0]),
                                     interpolation=cv2.INTER_AREA)
@@ -369,16 +367,17 @@ class sensor_read:
             x = self.radarRightObjList[-1].data["x"]
             y = self.radarRightObjList[-1].data["y"]
             z = self.radarRightObjList[-1].data["peakVal"]
-            img = heatmap(x, y , z, (-5,5), (0, 10))
+            img = heatmap(x, y, z, (-5, 5), (0, 5))
             right_radar = cv2.resize(img,
-                                    (self.blankImgshape[1], self.blankImgshape[0]),
-                                    interpolation=cv2.INTER_AREA)
+                                     (self.blankImgshape[1], self.blankImgshape[0]),
+                                     interpolation=cv2.INTER_AREA)
         else:
             right_radar = self.blankImg
         camera_images = np.hstack((left_image, right_image))
         radar_images = np.hstack((left_radar, right_radar))
         final_image = np.vstack((camera_images, radar_images))
-        cv2.imshow("Data Acquisition ", cv2.resize(final_image, (800, 600)))
+        cv2.imshow(window_title, cv2.resize(final_image, (800,600)))
+        keyCode = cv2.waitKey(self.loopCycleControl(start_time, sleep_enable=0))
 
     def run(self):
         if self.save:
@@ -399,12 +398,13 @@ class sensor_read:
                     self.closeAll()
                     self.saveAll() if self.save else None
             else:
+                window_title = "Data Acquisition "
+                cv2.namedWindow(window_title, cv2.WINDOW_AUTOSIZE)
                 try:
-                    cv2.namedWindow("Data Acquisition", cv2.WINDOW_AUTOSIZE)
                     while True:
                         start_time = time.time()
                         self.readAll()
-                        self.displayAll(start_time)
+                        self.displayAll(start_time, window_title)
                         self.index += 1
                 except KeyboardInterrupt:
                     self.closeAll()
@@ -418,5 +418,4 @@ if __name__ == "__main__":
     target = sensor_read("dacProfile.cfg")
     target.setup()
     target.run()
-
 
