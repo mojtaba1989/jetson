@@ -3,8 +3,6 @@ import time
 import numpy as np
 import platform
 import os
-import threading
-
 
 
 class awr1642:
@@ -23,8 +21,6 @@ class awr1642:
         self.byteBuffer = np.zeros(2 ** 15, dtype='uint8')
         self.byteBufferLength = 0
         self.magicWord = [2, 1, 4, 3, 6, 5, 8, 7]
-        self.readThread = None
-        self.readLock = threading.Lock()
         self.running = False
         self.failureRate = 0
         self.sensorIsReady = False
@@ -286,8 +282,6 @@ class awr1642:
         self.CLIport = {}
         self.Dataport = {}
         self.running = False
-        self.readThread.join()
-        self.readThread = None
 
     def sensorSetup(self):
         self.serrialConfig()
@@ -343,23 +337,16 @@ class awr1642:
             self.CLIport.write(('sensorStart\n').encode())
             time.sleep(.01)
             self.running = True
-            self.readThread = threading.Thread(target=self.update)
-            self.readThread.start()
             self.isOpened = True
             return self
 
     def update(self):
-        while self.running:
-            try:
-                with self.readLock:
-                    self.parseData()
-            except RuntimeError:
-                print("[ERROR] Could not read radar data - Port:" + self.CLIportNum)
+        self.parseData()
+
 
     def read(self):
-        with self.readLock:
-            dataOK = self.dataOK
-            detObj = self.detObj.copy()
+        dataOK = self.dataOK
+        detObj = self.detObj
         return dataOK, detObj
 
     def setDetectionThreashold(self, new_threshold):
