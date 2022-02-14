@@ -7,7 +7,6 @@ import platform
 import os
 import csv
 import sys
-import matplotlib.pyplot as plt
 
 from imx21983driver import CSI_Camera, gstreamer_pipeline
 from awr1642driver  import awr1642
@@ -351,7 +350,7 @@ class sensor_read:
                         print("", end="\r")
                     print("\nSuccessful")
 
-    def displayAll(self, start_time,  fig1, fig2, sc1, sc2):
+    def displayAll(self, start_time):
         window_title = "Data Acquisition "
         cv2.namedWindow(window_title, cv2.WINDOW_AUTOSIZE)
         left_image = self.cameraLeftObjList[-1].data if self.cameraLeftObjList and self.cameraLeftObjList[-1].data_is_ok else self.blankImg
@@ -400,17 +399,11 @@ class sensor_read:
                     self.closeAll()
                     self.saveAll() if self.save else None
             else:
-                plt.ion()
-                fig1, ax1 = plt.subplots()
-                fig2, ax2 = plt.subplots()
-                x, y = [],[]
-                sc1 = ax1.scatter(x,y)
-                sc2 = ax2.scatter(x,y)
                 try:
                     while True:
                         start_time = time.time()
                         self.readAll()
-                        self.displayAll(start_time, fig1, fig2, ax1, ax2)
+                        self.displayAll(start_time)
                         self.index += 1
                 except KeyboardInterrupt:
                     self.closeAll()
