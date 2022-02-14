@@ -7,6 +7,7 @@ import platform
 import os
 import csv
 import sys
+import matplotlib.pyplot as plt
 
 from imx21983driver import CSI_Camera, gstreamer_pipeline
 from awr1642driver  import awr1642
@@ -255,7 +256,7 @@ class sensor_read:
                     writer.writerow(radar_header)
                     for object in self.radarRightObjList:
                         print("Saving %d out of %d" %(object.index,
-                                                      self.radarRightObjList.__len__()))
+                                                      self.radarRightObjList.__len__()), end="")
                         if object.data_is_ok:
                             writer.writerow([
                                 object.time,
@@ -281,7 +282,7 @@ class sensor_read:
                     writer.writerow(radar_header)
                     for object in self.radarLeftObjList:
                         print("Saving %d out of %d" % (object.index,
-                                                       self.radarLeftObjList.__len__()))
+                                                       self.radarLeftObjList.__len__()), end="")
                         if object.data_is_ok:
                             writer.writerow([
                                 object.time,
@@ -357,7 +358,9 @@ class sensor_read:
             x = self.radarLeftObjList[-1].data["x"]
             y = self.radarLeftObjList[-1].data["y"]
             z = self.radarLeftObjList[-1].data["peakVal"]
-            img = heatmap(x, y, z, (-5, 5), (0, 5))
+            plt.scatter(x, y, s=50, c=zz, cmap='gray')
+            plt.savefig('img.png')
+            img = imread('img.png')
             left_radar = cv2.resize(img,
                                     (self.blankImgshape[1], self.blankImgshape[0]),
                                     interpolation=cv2.INTER_AREA)
@@ -367,7 +370,9 @@ class sensor_read:
             x = self.radarRightObjList[-1].data["x"]
             y = self.radarRightObjList[-1].data["y"]
             z = self.radarRightObjList[-1].data["peakVal"]
-            img = heatmap(x, y, z, (-5, 5), (0, 5))
+            plt.scatter(x, y, s=50, c=zz, cmap='gray')
+            plt.savefig('img.png')
+            img = imread('img.png')
             right_radar = cv2.resize(img,
                                      (self.blankImgshape[1], self.blankImgshape[0]),
                                      interpolation=cv2.INTER_AREA)
