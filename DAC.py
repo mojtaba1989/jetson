@@ -319,7 +319,7 @@ class sensor_read:
                 s=200,
                 c=self.radarRightObjList[-1].data["peakVal"],
                 cmap='gray')
-            fig.canvas.draw()
+            fig.canvas.draw_idle()
             plt.pause(0.001)
             right_radar = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
             right_radar = right_radar.reshape(fig.canvas.get_width_height()[::-1] + (3,))
@@ -337,7 +337,7 @@ class sensor_read:
                 s=200,
                 c=self.radarRightObjList[-1].data["peakVal"],
                 cmap='gray')
-            fig.canvas.draw()
+            fig.canvas.draw_idle()
             plt.pause(0.001)
             right_radar = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
             right_radar = right_radar.reshape(fig.canvas.get_width_height()[::-1] + (3,))
@@ -374,7 +374,7 @@ class sensor_read:
                     while True:
                         start_time = time.time()
                         self.readAll()
-                        self.displayAll(start_time, fig1, fig2, sc1, sc2)
+                        self.displayAll(start_time, fig)
                         self.index += 1
                 except KeyboardInterrupt:
                     self.closeAll()
