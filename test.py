@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import opencv
 
 plt.ion()
 fig, ax = plt.subplots()
@@ -13,7 +14,16 @@ for i in range(1000):
     x.append(np.random.rand(1)*10)
     y.append(np.random.rand(1)*10)
     sc.set_offsets(np.c_[x,y])
-    fig.canvas.draw_idle()
-    plt.pause(0.1)
+    fig.canvas.draw()
+    img = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8,
+            sep='')
+    img  = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+
+    # img is rgb, convert to opencv's default bgr
+    img = cv2.cvtColor(img,cv2.COLOR_RGB2BGR)
+
+
+    # display image with opencv or any operation you like
+    cv2.imshow("plot",img)
 
 plt.waitforbuttonpress()
