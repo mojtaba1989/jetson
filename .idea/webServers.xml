@@ -5,7 +5,7 @@
       <webServer id="067b01f4-192b-44ff-99d2-73e5d4ed84f6" name="jetson">
         <fileTransfer rootFolder="/home/jetson" accessType="SFTP" host="141.219.222.5" port="22" sshConfigId="96482dd9-635b-40f2-922c-70297570c3fd" sshConfig="jetson">
           <advancedOptions>
-            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" isUseRsync="true" />
           </advancedOptions>
         </fileTransfer>
       </webServer>

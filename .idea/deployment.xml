@@ -5,7 +5,7 @@
       <paths name="jetson">
         <serverdata>
           <mappings>
-            <mapping deploy="/home/jetson/DAC" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/home/jetson/DAC" local="$PROJECT_DIR$" web="" />
           </mappings>
         </serverdata>
       </paths>
