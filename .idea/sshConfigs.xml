@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="SshConfigs">
+    <configs>
+      <sshConfig authType="PASSWORD" host="141.219.222.5" id="96482dd9-635b-40f2-922c-70297570c3fd" port="22" customName="jetson" nameFormat="CUSTOM" username="jetson" useOpenSSHConfig="true">
+        <option name="customName" value="jetson" />
+      </sshConfig>
+    </configs>
+  </component>
+</project>
