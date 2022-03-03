@@ -12,6 +12,8 @@ from awr1642driver import awr1642
 from icm20948driver import IMU as imu
 from imx21983driver import CSI_Camera, gstreamer_pipeline
 
+print('salam dada')
+
 
 def undistort_func(dimension):
     mtx_left = np.array([[1.22443969e+03, 0.00000000e+00, 4.56407162e+02],
