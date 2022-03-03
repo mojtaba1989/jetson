@@ -8,6 +8,7 @@ import os
 import csv
 import sys
 import matplotlib.pyplot as plt
+import numpy as np
 
 from imx21983driver import CSI_Camera, gstreamer_pipeline
 from awr1642driver  import awr1642
