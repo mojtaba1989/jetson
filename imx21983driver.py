@@ -14,6 +14,7 @@
 import cv2
 import threading
 import numpy as np
+import time
 
 
 class CSI_Camera:
@@ -40,7 +41,7 @@ class CSI_Camera:
             # Grab the first frame to start the video capturing
             self.grabbed, self.frame = self.video_capture.read()
 
-        except RuntimeError:
+        except:
             self.video_capture = None
             print("Unable to open camera")
             print("Pipeline: " + gstreamer_pipeline_string)
@@ -79,9 +80,12 @@ class CSI_Camera:
 
     def read(self):
         with self.read_lock:
+            time_stamp = time.time()
             frame = self.frame
             grabbed = self.grabbed
-        return grabbed, frame
+            self.frame = None
+            self.grabbed = 0
+        return grabbed, frame, time_stamp
 
     def release(self):
         if self.video_capture != None:

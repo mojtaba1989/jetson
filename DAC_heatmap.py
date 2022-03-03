@@ -41,7 +41,7 @@ def heatmap(xr, yr, zr, xlim, ylim, xc=np.nan, yc=np.nan, xbinnum=100, ybinnum=1
         tab = np.zeros([xbinnum, ybinnum])
 
         for i in range(len(xr)):
-            tab[np.where(x_edges == xr[i]), np.where(y_edges == yr[i])] = + zr[i]
+            tab[np.where(x_edges == xr[i]), np.where(y_edges == yr[i])] += zr[i]
 
         try:
             for i in range(len(xc)):

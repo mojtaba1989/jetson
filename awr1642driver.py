@@ -3,7 +3,8 @@ import time
 import numpy as np
 import platform
 import os
-
+import threading
+import struct
 
 class awr1642:
     def __init__(self, configFileName, CLIport_num, Dataport_num, sensor_id=None):
@@ -18,14 +19,20 @@ class awr1642:
         self.frameNumber = 0
         self.detObj = {}
         self.config = [line.rstrip('\r\n') for line in open(self.configFileName)]
-        self.byteBuffer = np.zeros(2 ** 15, dtype='uint8')
+        self.byteBuffer = bytes([])
         self.byteBufferLength = 0
         self.magicWord = [2, 1, 4, 3, 6, 5, 8, 7]
+        self.magicWordB = bytearray(self.magicWord)
+        self.MMWDEMO_UART_MSG_DETECTED_POINTS = 1
+        self.MMWDEMO_UART_MSG_RANGE_PROFILE = 2
         self.running = False
         self.failureRate = 0
         self.sensorIsReady = False
         self.sensorID = sensor_id
         self.isOpened = False
+        self.read_thread = None
+        self.read_lock = threading.Lock()
+        self.postprocess = None
 
     def sendConfig(self):
         for i in self.config:
@@ -114,13 +121,14 @@ class awr1642:
 
 
         # Initialize variables
-        self.magicOK = 0  # Checks if magic number has been read
-        self.dataOK = 0  # Checks if the data has been read correctly
-        self.frameNumber = 0
-        self.detObj = {}
+        magicOK = 0  # Checks if magic number has been read
+        dataOK = 0  # Checks if the data has been read correctly
+        frameNumber = 0
+        detObj = {}
 
 
         readBuffer = self.Dataport.read(self.Dataport.in_waiting)
+        print(readBuffer)
         byteVec = np.frombuffer(readBuffer, dtype='uint8')
         byteCount = len(byteVec)
 
@@ -162,10 +170,10 @@ class awr1642:
 
                 # Check that all the packet has been read
                 if (self.byteBufferLength >= totalPacketLen) and (self.byteBufferLength != 0):
-                    self.magicOK = 1
+                    magicOK = 1
 
         # If magicOK is equal to 1 then process the message
-        if self.magicOK:
+        if magicOK:
             # word array to convert 4 bytes to a 32 bit number
             word = [1, 2 ** 8, 2 ** 16, 2 ** 24]
 
@@ -181,7 +189,7 @@ class awr1642:
             idX += 4
             platform = format(np.matmul(self.byteBuffer[idX:idX + 4], word), 'x')
             idX += 4
-            self.frameNumber = np.matmul(self.byteBuffer[idX:idX + 4], word)
+            frameNumber = np.matmul(self.byteBuffer[idX:idX + 4], word)
             idX += 4
             timeCpuCycles = np.matmul(self.byteBuffer[idX:idX + 4], word)
             idX += 4
@@ -250,10 +258,10 @@ class awr1642:
                     z = z / tlv_xyzQFormat
 
                     # Store the data in the detObj dictionary
-                    self.detObj = {"numObj": tlv_numObj, "rangeIdx": rangeIdx, "range": rangeVal, "dopplerIdx": dopplerIdx, \
+                    detObj = {"numObj": tlv_numObj, "rangeIdx": rangeIdx, "range": rangeVal, "dopplerIdx": dopplerIdx, \
                                    "doppler": dopplerVal, "peakVal": peakVal, "x": x, "y": y, "z": z}
 
-                    self.dataOK = 1
+                    dataOK = 1
 
                     # print(detObj['range'].mean())
 
@@ -261,7 +269,7 @@ class awr1642:
                     idX += tlv_length
 
             # Remove already processed data
-            if idX > 0 and self.dataOK == 1:
+            if idX > 0 and dataOK == 1:
                 shiftSize = idX
 
                 self.byteBuffer[:self.byteBufferLength - shiftSize] = self.byteBuffer[shiftSize:self.byteBufferLength]
@@ -270,6 +278,70 @@ class awr1642:
                 # Check that there are no errors with the buffer length
                 if self.byteBufferLength < 0:
                     self.byteBufferLength = 0
+        return dataOK, detObj
+
+    def fastParseData(self):
+        magicOK = 0  # Checks if magic number has been read
+        dataOK = 0  # Checks if the data has been read correctly
+        detObj = {}
+
+        readBuffer = self.Dataport.read(self.Dataport.in_waiting)
+        self.byteBuffer += readBuffer
+
+        if len(self.byteBuffer) > 16:
+            loc = self.byteBuffer.find(self.magicWordB)
+            if loc >= 0:
+                self.byteBuffer = self.byteBuffer[loc:]
+                self.byteBufferLength = len(self.byteBuffer)
+                totalPacketLen = struct.unpack('i', self.byteBuffer[12:16])[0]
+                if self.byteBufferLength and self.byteBufferLength >= totalPacketLen:
+                    magicOK = 1
+
+        if magicOK:
+            version, totalPacketLen, platForm, frameNumber, timeCpuCycles, numpDetectObj, numTLVs, subFrameNumber = struct.unpack('<llllllll', self.byteBuffer[8:40])
+            version = format(version, 'x')
+            platForm = format(platForm, 'x')
+            idX = 40
+            for tlvIdx in range(numTLVs):
+                tlv_type, tlv_length = struct.unpack("<ll", self.byteBuffer[idX:idX+8])
+                idX += 8
+                if tlv_type == self.MMWDEMO_UART_MSG_DETECTED_POINTS:
+                    tlv_numObj, tlv_xyzQFormat = struct.unpack("<hh", self.byteBuffer[idX:idX+4])
+                    idX += 4
+                    tlv_xyzQFormat = 2 ** tlv_xyzQFormat
+                    rangeIdx = np.zeros(tlv_numObj, dtype='int16')
+                    dopplerIdx = np.zeros(tlv_numObj, dtype='int16')
+                    peakVal = np.zeros(tlv_numObj, dtype='int16')
+                    x = np.zeros(tlv_numObj, dtype='int16')
+                    y = np.zeros(tlv_numObj, dtype='int16')
+                    z = np.zeros(tlv_numObj, dtype='int16')
+                    for odX in range(tlv_numObj):
+                        rangeIdx[odX], dopplerIdx[odX], peakVal[odX], x[odX], y[odX], z[odX] = struct.unpack("<hhhhhh", self.byteBuffer[idX:idX+12])
+                        idX += 12
+                    rangeVal = rangeIdx * self.configParameters["rangeIdxToMeters"]
+                    dopplerIdx[dopplerIdx > (self.configParameters["numDopplerBins"] / 2 - 1)] = dopplerIdx[dopplerIdx > (
+                            self.configParameters["numDopplerBins"] / 2 - 1)] - 65535
+                    dopplerVal = dopplerIdx * self.configParameters["dopplerResolutionMps"]
+                    x = x / tlv_xyzQFormat
+                    y = y / tlv_xyzQFormat
+                    z = z / tlv_xyzQFormat
+                    detObj = {"numObj": tlv_numObj,
+                              "rangeIdx": rangeIdx,
+                              "range": rangeVal,
+                              "dopplerIdx": dopplerIdx,
+                              "doppler": dopplerVal,
+                              "peakVal": peakVal,
+                              "x": x,
+                              "y": y,
+                              "z": z,
+                              }
+                    dataOK = 1
+                else:
+                    idX += tlv_length
+            if dataOK:
+                self.byteBuffer = self.byteBuffer[totalPacketLen:]
+                self.byteBufferLength = len(self.byteBuffer)
+        return dataOK, detObj
 
     def close(self):
         self.CLIport.write(('sensorStop\n').encode())
@@ -282,6 +354,8 @@ class awr1642:
         self.CLIport = {}
         self.Dataport = {}
         self.running = False
+        self.read_thread.join()
+        self.read_thread = None
 
     def sensorSetup(self):
         self.serrialConfig()
@@ -292,23 +366,15 @@ class awr1642:
     def open(self, max_failed=4):
         self.Dataport.reset_output_buffer()
         self.Dataport.reset_input_buffer()
-        self.byteBuffer = np.zeros(2 ** 15, dtype='uint8')
         self.byteBufferLength = 0
         self.CLIport.write(('sensorStart\n').encode())
         try:
             for i in range(5):
                 loopStartTime = time.time()
-                self.update()
-                while not self.dataOK and time.time()-loopStartTime > self.configParameters["framePeriodicity"]/1000:
-                    self.update()
-                    time.sleep(.01)
+                self.dataOK, self.detObj = self.fastParseData()
+                print(time.time()-loopStartTime)
                 if not self.dataOK:
                     self.failureRate += 1
-                    self.Dataport.reset_output_buffer()
-                    self.Dataport.reset_input_buffer()
-                    self.byteBuffer = np.zeros(2 ** 15, dtype='uint8')
-                    self.byteBufferLength = 0
-                    time.sleep(.01)
                 time.sleep(self.configParameters["framePeriodicity"]/1000 - (time.time() - loopStartTime))
             self.Dataport.reset_output_buffer()
             self.Dataport.reset_input_buffer()
@@ -332,23 +398,34 @@ class awr1642:
         if self.sensorIsReady:
             self.Dataport.reset_output_buffer()
             self.Dataport.reset_input_buffer()
-            self.byteBuffer = np.zeros(2 ** 15, dtype='uint8')
             self.byteBufferLength = 0
             self.CLIport.write(('sensorStart\n').encode())
             time.sleep(.01)
             self.running = True
             self.isOpened = True
-            return self
+            self.read_thread = threading.Thread(target=self.update)
+            self.read_thread.start()
+        return self
 
     def update(self):
-        self.parseData()
-
+        while self.running:
+            try:
+                dataOK, detObj = self.fastParseData()
+                with self.read_lock:
+                    if dataOK:
+                        self.dataOK = dataOK
+                        self.detObj = detObj
+            except RuntimeError:
+                print("Could not read point cloud from radar")
 
     def read(self):
-        self.update()
-        dataOK = self.dataOK
-        detObj = self.detObj
-        return dataOK, detObj
+        with self.read_lock:
+            time_stamp = time.time()
+            dataOK = self.dataOK
+            detObj = self.detObj
+            self.dataOK = 0
+            self.detObj = {}
+        return dataOK, detObj, time_stamp
 
     def setDetectionThreashold(self, new_threshold):
         idx = [i for i, s in enumerate(self.config) if "cfarCfg -1 0" in s][0]
