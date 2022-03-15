@@ -1,7 +1,14 @@
+import copy
 import csv
+import logging
+import multiprocessing
 import os
+import queue
+import shutil
+import signal
 import sys
 import time
+from multiprocessing import Queue, Value
 from time import strftime, localtime
 
 import cv2
@@ -12,6 +19,31 @@ from awr1642driver import awr1642
 from icm20948driver import IMU as imu
 from imx21983driver import CSI_Camera, gstreamer_pipeline
 
+
+def get_ip():
+    import subprocess
+    lst_txt = subprocess.check_output('ifconfig', shell=True).decode("utf-8").splitlines()
+    while True:
+        temp = lst_txt.pop(0)
+        if 'wlan' in temp:
+            temp = lst_txt.pop(0).split(' ')
+            break
+    return temp[9]
+
+class DelayedKeyboardInterrupt:
+
+    def __enter__(self):
+        self.signal_received = False
+        self.old_handler = signal.signal(signal.SIGINT, self.handler)
+
+    def handler(self, sig, frame):
+        self.signal_received = (sig, frame)
+        logging.debug('SIGINT received. Delaying KeyboardInterrupt.')
+
+    def __exit__(self, type, value, traceback):
+        signal.signal(signal.SIGINT, self.old_handler)
+        if self.signal_received:
+            self.old_handler(*self.signal_received)
 
 def undistort_func(dimension):
     mtx_left = np.array([[1.22443969e+03, 0.00000000e+00, 4.56407162e+02],
@@ -24,8 +56,8 @@ def undistort_func(dimension):
                           [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]])
     dist_right = np.array([[-0.00970787,  0.59812137, -0.01065168, -0.00521563, -1.62548014]])
     h,  w = dimension[:2]
-    newcameramtx_l, roi_l = cv.getOptimalNewCameraMatrix(mtx_left, dist_left, (w, h), 1, (w, h))
-    newcameramtx_r, roi_r = cv.getOptimalNewCameraMatrix(mtx_right, dist_right, (w, h), 1, (w, h))
+    newcameramtx_l, roi_l = cv2.getOptimalNewCameraMatrix(mtx_left, dist_left, (w, h), 1, (w, h))
+    newcameramtx_r, roi_r = cv2.getOptimalNewCameraMatrix(mtx_right, dist_right, (w, h), 1, (w, h))
     return mtx_left, dist_left, newcameramtx_l, roi_l, mtx_right, dist_right, newcameramtx_r, roi_r
 
 def heatmap(xr, yr, zr, xlim, ylim, xc=np.nan, yc=np.nan, xbinnum=100, ybinnum=100):
@@ -74,67 +106,116 @@ def heatmap(xr, yr, zr, xlim, ylim, xc=np.nan, yc=np.nan, xbinnum=100, ybinnum=1
 
 class sensor_read:
     def __init__(self, configFileName):
+        # configuration
+        print('[INFO] Loading configuration...')
         self.dirPath = os.getcwd()
         self.dirName = None
         self.configFileName = configFileName
-        self.config = [line.rstrip('\r\n') for line in open(
-            self.configFileName)]
+        self.config = [line.rstrip('\r\n') for line in open(self.configFileName)]
         self.configParameters = {}
+        self.sampling = None
+        self.is_running = False
+
+        # sensor objects
         self.left_radar = None
         self.right_radar = None
         self.left_camera = None
         self.right_camera = None
         self.imu = None
         self.writer = None
-        self.radarLeftObjList = []
-        self.radarRightObjList = []
-        self.cameraLeftObjList = []
-        self.cameraRightObjList = []
-        self.imuObjList = []
         self.sensorList = []
+
+        # sensor data object lists - CSV
+        self.csvBuffer = []
+
+        # display setup
         self.display = 0
         self.displayMethod = 'heatmap'
-        self.save = 0
-        self.index = 0
-        self.sampling = None
         self.blankImg = cv2.imread('NoSignal.jpg', cv2.IMREAD_UNCHANGED)
-        self.blankImgshape = self.blankImg.shape
-        self.Left_Stereo_Map_x = None
-        self.Left_Stereo_Map_y = None
-        self.Right_Stereo_Map_x = None
-        self.Right_Stereo_Map_y = None
-        self.numDisparities = None
-        self.blockSize = None
-        self.preFilterType = None
-        self.preFilterSize = None
-        self.preFilterCap = None
-        self.textureThreshold = None
-        self.uniquenessRatio = None
-        self.speckleRange = None
-        self.speckleWindowSize = None
-        self.disp12MaxDiff = None
-        self.minDisparity = None
-        self.stereo = None
+        self.blankImgShape = self.blankImg.shape
+
+        # save method setup
+        self.saveCSV = 0
+        self.saveIMG = 0
+        self.index = 0
+        self.imgBuffer = Queue()
+        self.leftRadarWriter = None
+        self.rightRadarWriter = None
+        self.leftCameraWriter = None
+        self.rightCameraWriter = None
+        self.imuWriter = None
+        self.leftRadarFile = None
+        self.rightRadarFile = None
+        self.leftCameraFile = None
+        self.rightCameraFile = None
+        self.imuFile = None
+        self.zip = None
+        self.ip_address = None
+
+        # image postprocessing
+        self.camPars = self.stereoCalib()
         self.getCamPars('params_py.xml', 'depth_pars.xml')
+        print('[OK] Loading configuration is done')
 
     class objCreate:
-        def __init__(self, time, index, data, data_is_ok=0):
+        def __init__(self, time, index, data, data_is_ok=0, source=None):
             self.time = time
             self.index = index
             self.data = data
             self.data_is_ok = data_is_ok
+            self.isSaved = False
+            self.isProcessed = False
+            self.source = source
 
-    def append(self, obj, sensor_id):
-        if sensor_id == "left_radar":
-            self.radarLeftObjList.append(obj)
-        elif sensor_id == "right_radar":
-            self.radarRightObjList.append(obj)
-        elif sensor_id == "left_camera":
-            self.cameraLeftObjList.append(obj)
-        elif sensor_id == "right_camera":
-            self.cameraRightObjList.append(obj)
-        elif sensor_id == 'imu':
-            self.imuObjList.append(obj)
+    class addProcessor:
+        def __init__(self, name, target, args, num_of_cores=2):
+            self.read_thread    = None
+            self.name           = name
+            self.running        = Value('i', 0)
+            self.target         = target
+            self.args           = args
+            self.num_of_cores   = num_of_cores
+            self.jobs           = []
+
+        def start(self):
+            self.running.value = 1
+            for i in range(self.num_of_cores):
+                process = multiprocessing.Process(target=self.target, args=self.args)
+                self.jobs.append(process)
+            for job in self.jobs:
+                job.start()
+            print(f'[INFO] Parallel {self.name} status: {bool(self.running)}')
+
+        def stop(self):
+            self.running.value = 0
+            for job in self.jobs:
+                if job.is_alive():
+                    job.join()
+
+    class stereoCalib:
+        def __init__(self):
+            self.Left_Stereo_Map_x = None
+            self.Left_Stereo_Map_y = None
+            self.Right_Stereo_Map_x = None
+            self.Right_Stereo_Map_y = None
+            self.numDisparities = None
+            self.blockSize = None
+            self.preFilterType = None
+            self.preFilterSize = None
+            self.preFilterCap = None
+            self.textureThreshold = None
+            self.uniquenessRatio = None
+            self.speckleRange = None
+            self.speckleWindowSize = None
+            self.disp12MaxDiff = None
+            self.minDisparity = None
+            self.stereo = None
+
+    def append(self, obj):
+        self.csvBuffer.append(obj)
+        if 'camera' in obj.source:
+            self.imgBuffer.put(copy.copy(obj))
+
 
     def setDirectories(self):
         try:
@@ -180,7 +261,7 @@ class sensor_read:
                          int(splitWords[7])),
                         interpolation=cv2.INTER_AREA
                     )
-                    self.blankImgshape = self.blankImg.shape
+                    self.blankImgShape = self.blankImg.shape
                 else:
                     self.right_camera = CSI_Camera('right_camera')
                     self.right_camera.open(
@@ -202,7 +283,7 @@ class sensor_read:
                          int(splitWords[7])),
                         interpolation=cv2.INTER_AREA
                     )
-                    self.blankImgshape = self.blankImg.shape
+                    self.blankImgShape = self.blankImg.shape
             elif "radar" in splitWords[0] and int(splitWords[1]):
                 if not int(splitWords[2]):
                     self.left_radar = awr1642(
@@ -234,21 +315,46 @@ class sensor_read:
                     self.right_radar.open()
                     time.sleep(.01)
                     self.sensorList.append(self.right_radar)
-            elif "output" in splitWords[0]:
-                self.save = int(splitWords[1])
-                self.display = int(splitWords[2])
-                try:
-                    self.displayMethod = 'scatter' if int(splitWords[3]) else 'heatmap'
-                except:
-                    pass
-
-            elif "sampling" in splitWords[0] and int(splitWords[1]):
-                self.sampling = float(splitWords[2])
-
             elif "imu" in splitWords[0] and int(splitWords[1]):
                 self.imu = imu("imu")
                 self.imu.open()
                 self.sensorList.append(self.imu)
+            elif "output" in splitWords[0]:
+                self.saveIMG = int(splitWords[1])
+                self.saveCSV = int(splitWords[1])
+                if self.saveCSV:
+                    self.setDirectories()
+                    radar_header = ["index", "time", "x", "y", "range", "peakVal", "doppler"]
+                    camera_header = ["index", "time", "imageName"]
+                    imu_header = ["index", "time", "x", "y", "z", "ax", "ay", "az", "gx", "gy", "gz"]
+                    if self.left_radar:
+                        self.leftRadarFile = open(self.dirPath+'/'+self.dirName+'left-radar.csv', 'w', newline='')
+                        self.leftRadarWriter = csv.writer(self.leftRadarFile)
+                        self.leftRadarWriter.writerow(radar_header)
+                    if self.right_radar:
+                        self.rightRadarFile = open(self.dirPath+'/'+self.dirName+'right-radar.csv', 'w', newline='')
+                        self.rightRadarWriter = csv.writer(self.rightRadarFile)
+                        self.rightRadarWriter.writerow(radar_header)
+                    if self.left_camera:
+                        self.leftCameraFile = open(self.dirPath+'/'+self.dirName+'left-camera.csv', 'w', newline='')
+                        self.leftCameraWriter = csv.writer(self.leftCameraFile)
+                        self.leftCameraWriter.writerow(camera_header)
+                    if self.right_camera:
+                        self.rightCameraFile = open(self.dirPath+'/'+self.dirName+'right-camera.csv', 'w', newline='')
+                        self.rightCameraWriter = csv.writer(self.rightCameraFile)
+                        self.rightCameraWriter.writerow(camera_header)
+                    if self.imu:
+                        self.imuFile = open(self.dirPath+'/'+self.dirName+'imu.csv', 'w', newline='')
+                        self.imuWriter = csv.writer(self.imuFile)
+                        self.imuWriter.writerow(imu_header)
+                    self.saveIMG = self.addProcessor('saving', target=self.imgWriter, args=(self.imgBuffer,), num_of_cores=4)
+                self.display = int(splitWords[2])
+                if self.display:
+                    self.displayMethod = 'scatter' if int(splitWords[3]) else 'heatmap'
+                self.zip = int(splitWords[4])
+                self.ip_address = int(splitWords[5])
+            elif "sampling" in splitWords[0] and int(splitWords[1]):
+                self.sampling = float(splitWords[2])
 
     def closeAll(self):
         for obj in [self.left_radar, self.right_radar]:
@@ -264,18 +370,37 @@ class sensor_read:
             except Exception as error:
                 print(error)
                 continue
-
+        if self.saveIMG:
+            self.saveIMG.running.value = 0
+        self.saveIMG = None
+        if self.leftRadarFile:
+            self.leftRadarFile.close()
+        if self.rightRadarFile:
+            self.rightRadarFile.close()
+        if self.leftCameraFile:
+            self.leftCameraFile.close()
+        if self.rightCameraFile:
+            self.rightCameraFile.close()
+        if self.imuFile:
+            self.imuFile.close()
         try:
             cv2.destroyAllWindows()
         except:
             pass
+        if self.zip:
+            os.chdir('..')
+            shutil.make_archive(self.dirName, 'zip', self.dirName)
+        if self.ip_address:
+            print(f"scp jetson@{get_ip()}:{os.getcwd()}/{self.dirName}.zip ~")
+
+
 
     def loopCycleControl(self, start_time, sleep_enable=1):
         if sleep_enable:
             if time.time()-start_time < 1/self.sampling:
                 time.sleep(1/self.sampling +
                            start_time -time.time())
-                print("\r[INFO] Actual rate:%d" % int(1/(time.time()-start_time)), end="")
+                print(f"\r[INFO] Actual rate:{int(1/(time.time()-start_time))} - Buffer length: {self.imgBuffer.qsize()}              ", end="")
             elif time.time()-start_time > 1/self.sampling:
                 print("\r[WARNING] High sampling rate - Actual rate:%d" % int(1/(time.time()-start_time)), end="")
                 time.sleep(0.001)
@@ -293,152 +418,91 @@ class sensor_read:
     def readAll(self):
         for sensor in self.sensorList:
             grabbed, data, time_stamp = sensor.read()
-            self.append(self.objCreate(
+            tempObj = self.objCreate(
                 time_stamp,
                 self.index,
-                data, grabbed),
+                data,
+                grabbed,
                 sensor.sensorID)
+            self.append(tempObj)
 
-    def saveAll(self):
-        if self.save:
-            radar_header = \
-                ["index", "time", "x", "y", "range", "peakVal", "doppler"]
-            camera_header = \
-                ["index", "time", "imageName"]
-            imu_header = ["index", "time", "x", "y", "z", "ax", "ay", "az", "gx", "gy", "gz"]
-            if self.right_radar:
-                print("[SAVE] Right RADAR: Creating CSV File", )
-                with open(self.dirPath+'/'+self.dirName+'right-radar.csv','w', newline='') \
-                        as outputfile:
-                    writer = csv.writer(outputfile)
-                    writer.writerow(radar_header)
-                    for object in self.radarRightObjList:
-                        print("Saving %d out of %d" %(object.index,
-                                                      self.radarRightObjList.__len__()), end="")
-                        if object.data_is_ok:
-                            writer.writerow([
-                                object.index,
-                                object.time,
-                                object.data["x"],
-                                object.data["y"],
-                                object.data["peakVal"],
-                                object.data["doppler"],
-                            ])
-                        else:
-                            writer.writerow([
-                                object.time,
-                                object.index,
-                                "", "", "", "",
-                            ])
-                        print("", end="\r")
-                    print("\nSuccessful")
-            if self.left_radar:
-                print("[SAVE] Left RADAR: Creating CSV File", )
-                with open(self.dirPath+'/'+self.dirName+'left-radar.csv', 'w', newline='') \
-                        as outputfile:
-                    writer = csv.writer(outputfile)
-                    writer.writerow(radar_header)
-                    for object in self.radarLeftObjList:
-                        print("Saving %d out of %d" % (object.index,
-                                                       self.radarLeftObjList.__len__()), end="")
-                        if object.data_is_ok:
-                            writer.writerow([
-                                object.index,
-                                object.time,
-                                object.data["x"],
-                                object.data["y"],
-                                object.data["peakVal"],
-                                object.data["doppler"],
-                            ])
-                        else:
-                            writer.writerow([
-                                object.time,
-                                object.index,
-                                "", "", "", "",
-                            ])
-                        print("", end="\r")
-                    print("\nSuccessful")
-            if self.left_camera:
-                print("[SAVE] Left Camera: Creating CSV File", )
-                with open(self.dirPath+'/'+self.dirName+'left-camera.csv', 'w', newline='') \
-                        as outputfile:
-                    writer = csv.writer(outputfile)
-                    writer.writerow(camera_header)
-                    for object in self.cameraLeftObjList:
-                        print("Saving %d out of %d" % (object.index,
-                                                       self.cameraLeftObjList.__len__()), end="")
-                        filename = "Figure-left-camera/img_left_%d.jpg" % object.index
-                        if object.data_is_ok:
-                            writer.writerow([
-                                object.index,
-                                object.time,
-                                filename
-                            ])
-                            cv2.imwrite(filename, object.data)
-                        else:
-                            writer.writerow([
-                                object.index,
-                                object.time,
-                                "",
-                            ])
-                        print("", end="\r")
-                    print("\nSuccessful")
-            if self.right_camera:
-                print("[SAVE] Right Camera: Creating CSV File", )
-                with open(self.dirPath+'/'+self.dirName+'right-camera.csv', 'w', newline='') \
-                        as outputfile:
-                    writer = csv.writer(outputfile)
-                    writer.writerow(camera_header)
-                    for object in self.cameraRightObjList:
-                        print("Saving %d out of %d" % (object.index,
-                                                       self.cameraRightObjList.__len__()), end="")
-                        filename = "Figure-right-camera/img_right_%d.jpg" % object.index
-                        if object.data_is_ok:
-                            writer.writerow([
-                                object.index,
-                                object.time,
-                                filename
-                            ])
-                            cv2.imwrite(filename, object.data)
-                        else:
-                            writer.writerow([
-                                object.index,
-                                object.time,
-                                "",
-                            ])
-                        print("", end="\r")
-                    print("\nSuccessful")
-            if self.imu:
-                print("[SAVE] imu: Creating CSV File", )
-                with open(self.dirPath+'/'+self.dirName+'imu.csv', 'w', newline='') \
-                        as outputfile:
-                    writer = csv.writer(outputfile)
-                    writer.writerow(imu_header)
-                    for object in self.imuObjList:
-                        print("Saving %d out of %d" % (object.index,
-                                                       self.radarRightObjList.__len__()), end="")
-                        if object.data_is_ok:
-                            writer.writerow([
-                                object.index,
-                                object.time,
-                                object.data[0],
-                                object.data[1],
-                                object.data[2],
-                                object.data[3],
-                                object.data[4],
-                                object.data[5],
-                                object.data[6],
-                                object.data[7],
-                                object.data[8],
-                            ])
-                        else:
-                            writer.writerow([
-                                object.time,
-                                object.index,
-                                "", "", "", "", "", "", "", "", "",
-                            ])
-                        print("", end="\r")
-                    print("\nSuccessful")
+    def csvWriter(self):
+        try:
+            while True:
+                tempObj = self.csvBuffer.pop(0)
+                if 'radar' in tempObj.source:
+                    writer = self.leftRadarWriter if 'left' in tempObj.source else self.rightRadarWriter
+                    if tempObj.data_is_ok:
+                        writer.writerow([
+                            tempObj.index,
+                            tempObj.time,
+                            tempObj.data["x"],
+                            tempObj.data["y"],
+                            tempObj.data["peakVal"],
+                            tempObj.data["doppler"],
+                        ])
+                    else:
+                        writer.writerow([
+                            tempObj.index,
+                            tempObj.time,
+                            "", "", "", ""])
+                elif 'camera' in tempObj.source:
+                    writer = self.leftCameraWriter if 'left' in tempObj.source else self.rightCameraWriter
+                    filename = "Figure-left-camera/img_left_%d.jpg" % tempObj.index if 'left' in tempObj.source else "Figure-right-camera/img_right_%d.jpg" % tempObj.index
+                    if tempObj.data_is_ok:
+                        writer.writerow([
+                            tempObj.index,
+                            tempObj.time,
+                            filename
+                        ])
+                    else:
+                        writer.writerow([
+                            tempObj.index,
+                            tempObj.time,
+                            "",
+                        ])
+                elif 'imu' in tempObj.source:
+                    writer = self.imuWriter
+                    if tempObj.data_is_ok:
+                        writer.writerow([
+                            tempObj.index,
+                            tempObj.time,
+                            tempObj.data[0],
+                            tempObj.data[1],
+                            tempObj.data[2],
+                            tempObj.data[3],
+                            tempObj.data[4],
+                            tempObj.data[5],
+                            tempObj.data[6],
+                            tempObj.data[7],
+                            tempObj.data[8],
+                        ])
+                    else:
+                        writer.writerow([
+                            tempObj.index,
+                            tempObj.time,
+                            "", "", "", "", "", "", "", "", "",
+                        ])
+        except IndexError:
+            pass
+        except KeyboardInterrupt:
+            pass
+
+    def imgWriter(self, data_buffer):
+        while self.saveIMG.running.value or not data_buffer.empty():
+            if not self.saveIMG.running.value:
+                print(f'\r[INFO] Remained images to save : {data_buffer.qsize()}', end='')
+            try:
+                tempObj = data_buffer.get(0)
+                if tempObj.data_is_ok:
+                    filename = f"Figure-left-camera/img_left_{tempObj.index}.jpg" if 'left' in tempObj.source else f"Figure-right-camera/img_right_{tempObj.index}.jpg"
+                    cv2.imwrite(filename, tempObj.data)
+            except RuntimeError:
+                print('[ERROR] Could not save an image')
+            except queue.Empty:
+                pass
+        else:
+            print(f"[INFO] process id: {os.getpid()} has joined\n")
 
     def displayAll(self, start_time, window_title):
         if self.left_camera:
@@ -474,8 +538,8 @@ class sensor_read:
             else:
                 img = heatmap(x, y, z, (-2, 2), (0, 4))
             left_radar = cv2.resize(img,
-                             (self.blankImgshape[1], self.blankImgshape[0]),
-                             interpolation=cv2.INTER_AREA)
+                                    (self.blankImgShape[1], self.blankImgShape[0]),
+                                    interpolation=cv2.INTER_AREA)
         else:
             left_radar = self.blankImg
         if self.right_radar:
@@ -492,8 +556,8 @@ class sensor_read:
             else:
                 img = heatmap(x, y, z, (-2, 2), (0, 4))
             right_radar = cv2.resize(img,
-                                    (self.blankImgshape[1], self.blankImgshape[0]),
-                                    interpolation=cv2.INTER_AREA)
+                                     (self.blankImgShape[1], self.blankImgShape[0]),
+                                     interpolation=cv2.INTER_AREA)
         else:
             right_radar = self.blankImg
         camera_images = np.hstack((left_image, right_image))
@@ -503,26 +567,31 @@ class sensor_read:
         self.loopCycleControl(start_time, sleep_enable=0)
 
     def run(self):
-        if self.save:
-            self.setDirectories()
+        if self.saveIMG:
+            with DelayedKeyboardInterrupt():
+                self.saveIMG.start()
         for sensor in self.sensorList:
             sensor.start()
             print(sensor, sensor.sensorID, sensor.isOpened)
         if self.sensorList \
                 and all([sensor.isOpened for sensor in self.sensorList]):
             print('[INFO] Recording...')
+            self.is_running = True
             if not self.display:
-                try:
-                    while True:
+                while self.is_running:
+                    try:
                         start_time = time.time()
                         self.readAll()
+                        self.csvWriter()
                         self.loopCycleControl(start_time)
                         self.index += 1
-                except KeyboardInterrupt:
-                    print("\n Capture distrupted")
+                    except KeyboardInterrupt:
+                        self.is_running = False
+                        pass
+                else:
+                    print("\n Capture disrupted")
+                    print(f"[INFO] Estimated buffer size :{self.imgBuffer.qsize()}\n", end="")
                     self.closeAll()
-                    if self.save:
-                        self.saveAll()
             else:
                 window_title = "Data Acquisition "
                 cv2.namedWindow(window_title, cv2.WINDOW_AUTOSIZE)
@@ -533,48 +602,47 @@ class sensor_read:
                         self.displayAll(start_time, window_title)
                         self.index += 1
                 except KeyboardInterrupt:
-                    print("\n Capture distrupted")
+                    print("\n Capture disrupted")
                     time.sleep(3)
                     self.closeAll()
                     cv2.destroyAllWindows()
                     time.sleep(3)
-                    if self.save: self.saveAll()
         else:
             print("[ERROR] Not all sensors have been opened correctly")
             self.closeAll()
 
     def getCamPars(self, path_to_calib_xml, path_to_depth_xml):
         cv_file = cv2.FileStorage(path_to_calib_xml, cv2.FILE_STORAGE_READ)
-        self.Left_Stereo_Map_x = cv_file.getNode("Left_Stereo_Map_x").mat()
-        self.Left_Stereo_Map_y = cv_file.getNode("Left_Stereo_Map_y").mat()
-        self.Right_Stereo_Map_x = cv_file.getNode("Right_Stereo_Map_x").mat()
-        self.Right_Stereo_Map_y = cv_file.getNode("Right_Stereo_Map_y").mat()
+        self.camPars.Left_Stereo_Map_x = cv_file.getNode("Left_Stereo_Map_x").mat()
+        self.camPars.Left_Stereo_Map_y = cv_file.getNode("Left_Stereo_Map_y").mat()
+        self.camPars.Right_Stereo_Map_x = cv_file.getNode("Right_Stereo_Map_x").mat()
+        self.camPars.Right_Stereo_Map_y = cv_file.getNode("Right_Stereo_Map_y").mat()
         cv_file.release()
         cv_file = cv2.FileStorage(path_to_depth_xml, cv2.FILE_STORAGE_READ)
-        self.numDisparities = int(cv_file.getNode("numDisparities").real())
-        self.blockSize = int(cv_file.getNode("blockSize").real())
-        self.preFilterType = int(cv_file.getNode("preFilterType").real())
-        self.preFilterSize = int(cv_file.getNode("preFilterSize").real())
-        self.preFilterCap = int(cv_file.getNode("preFilterCap").real())
-        self.textureThreshold = int(cv_file.getNode("textureThreshold").real())
-        self.uniquenessRatio = int(cv_file.getNode("uniquenessRatio").real())
-        self.speckleRange = int(cv_file.getNode("speckleRange").real())
-        self.speckleWindowSize = int(cv_file.getNode("speckleWindowSize").real())
-        self.disp12MaxDiff = int(cv_file.getNode("disp12MaxDiff").real())
-        self.minDisparity = int(cv_file.getNode("minDisparity").real())
+        self.camPars.numDisparities = int(cv_file.getNode("numDisparities").real())
+        self.camPars.blockSize = int(cv_file.getNode("blockSize").real())
+        self.camPars.preFilterType = int(cv_file.getNode("preFilterType").real())
+        self.camPars.preFilterSize = int(cv_file.getNode("preFilterSize").real())
+        self.camPars.preFilterCap = int(cv_file.getNode("preFilterCap").real())
+        self.camPars.textureThreshold = int(cv_file.getNode("textureThreshold").real())
+        self.camPars.uniquenessRatio = int(cv_file.getNode("uniquenessRatio").real())
+        self.camPars.speckleRange = int(cv_file.getNode("speckleRange").real())
+        self.camPars.speckleWindowSize = int(cv_file.getNode("speckleWindowSize").real())
+        self.camPars.disp12MaxDiff = int(cv_file.getNode("disp12MaxDiff").real())
+        self.camPars.minDisparity = int(cv_file.getNode("minDisparity").real())
         cv_file.release()
         self.stereo = cv2.StereoBM_create()
-        self.stereo.setNumDisparities(self.numDisparities)
-        self.stereo.setBlockSize(self.blockSize)
-        self.stereo.setPreFilterType(self.preFilterType)
-        self.stereo.setPreFilterSize(self.preFilterSize)
-        self.stereo.setPreFilterCap(self.preFilterCap)
-        self.stereo.setTextureThreshold(self.textureThreshold)
-        self.stereo.setUniquenessRatio(self.uniquenessRatio)
-        self.stereo.setSpeckleRange(self.speckleRange)
-        self.stereo.setSpeckleWindowSize(self.speckleWindowSize)
-        self.stereo.setDisp12MaxDiff(self.disp12MaxDiff)
-        self.stereo.setMinDisparity(self.minDisparity)
+        self.stereo.setNumDisparities(self.camPars.numDisparities)
+        self.stereo.setBlockSize(self.camPars.blockSize)
+        self.stereo.setPreFilterType(self.camPars.preFilterType)
+        self.stereo.setPreFilterSize(self.camPars.preFilterSize)
+        self.stereo.setPreFilterCap(self.camPars.preFilterCap)
+        self.stereo.setTextureThreshold(self.camPars.textureThreshold)
+        self.stereo.setUniquenessRatio(self.camPars.uniquenessRatio)
+        self.stereo.setSpeckleRange(self.camPars.speckleRange)
+        self.stereo.setSpeckleWindowSize(self.camPars.speckleWindowSize)
+        self.stereo.setDisp12MaxDiff(self.camPars.disp12MaxDiff)
+        self.stereo.setMinDisparity(self.camPars.minDisparity)
 
     def camCalib(self, img, sensor_id):
         if 'left' in sensor_id:
@@ -644,8 +712,8 @@ class sensor_read:
                 else:
                     img = heatmap(x, y, z, (-2, 2), (0, 4))
                 img = cv2.resize(img,
-                                        (self.blankImgshape[1], self.blankImgshape[0]),
-                                        interpolation=cv2.INTER_AREA)
+                                 (self.blankImgShape[1], self.blankImgShape[0]),
+                                 interpolation=cv2.INTER_AREA)
                 with self.left_radar.postprocess.read_lock:
                     self.left_radar_output = img # post porcessed
                 self.left_radar.postprocess.processed = True
@@ -670,13 +738,12 @@ class sensor_read:
                 else:
                     img = heatmap(x, y, z, (-2, 2), (0, 4))
                 img = cv2.resize(img,
-                                 (self.blankImgshape[1], self.blankImgshape[0]),
+                                 (self.blankImgShape[1], self.blankImgShape[0]),
                                  interpolation=cv2.INTER_AREA)
                 with self.right_radar.postprocess.read_lock:
                     self.right_radar_output = img # post porcessed
                 self.right_radar.postprocess.processed = True
                 self.right_radar.postprocess.new_data = False
-
 
 if __name__ == "__main__":
     target = sensor_read("dacProfile.cfg")

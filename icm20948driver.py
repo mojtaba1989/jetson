@@ -1,7 +1,7 @@
-import time
-from icm20948 import ICM20948
 import threading
-import numpy as np
+import time
+
+from icm20948 import ICM20948
 
 
 class IMU:
