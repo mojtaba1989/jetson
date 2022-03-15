@@ -346,6 +346,7 @@ class awr1642:
         return dataOK, detObj
 
     def close(self):
+        self.running = False
         self.CLIport.write(('sensorStop\n').encode())
         time.sleep(0.01)
         print('sensorStop\n')
@@ -355,7 +356,6 @@ class awr1642:
         time.sleep(0.01)
         self.CLIport = {}
         self.Dataport = {}
-        self.running = False
         self.read_thread.join()
         self.read_thread = None
 
@@ -419,6 +419,8 @@ class awr1642:
                         self.detObj = detObj
             except RuntimeError:
                 print("Could not read point cloud from radar")
+            except KeyboardInterrupt:
+                pass
 
     def read(self):
         with self.read_lock:
