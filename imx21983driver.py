@@ -10,29 +10,33 @@
 # arranged horizontally.
 # The camera streams are each read in their own thread, as when done sequentially there
 # is a noticeable lag
-
+import csv
 import threading
 import time
 
 import cv2
 import numpy as np
+import os
+import queue
+import random
 
 
 class CSI_Camera:
 
     def __init__(self, sensor_id=None):
-        # Initialize instance variables
-        # OpenCV video capture element
         self.video_capture = None
-        # The last captured image from the camera
         self.frame = None
         self.grabbed = False
-        # The thread where the video capture runs
         self.read_thread = None
         self.read_lock = threading.Lock()
         self.running = False
         self.sensorID = sensor_id
         self.isOpened = False
+        self.sensorIsReady = False
+        self.postprocess = None
+        self.logObj = None
+        self.writerObj = None
+
 
     def open(self, gstreamer_pipeline_string):
         try:
@@ -41,6 +45,7 @@ class CSI_Camera:
             )
             # Grab the first frame to start the video capturing
             self.grabbed, self.frame = self.video_capture.read()
+            self.sensorIsReady = self.grabbed
 
         except:
             self.video_capture = None
@@ -65,9 +70,12 @@ class CSI_Camera:
         # Kill the thread
         self.read_thread.join()
         self.read_thread = None
+        if self.video_capture != None:
+            self.video_capture.release()
+            self.video_capture = None
+        print(f'[OK]{self.sensorID} is closed')
 
     def updateCamera(self):
-        # This is the thread to read images from the camera
         while self.running:
             try:
                 grabbed, frame = self.video_capture.read()
@@ -76,8 +84,6 @@ class CSI_Camera:
                     self.frame = frame
             except RuntimeError:
                 print("Could not read image from camera")
-        # FIX ME - stop and cleanup thread
-        # Something bad happened
 
     def read(self):
         with self.read_lock:
@@ -92,9 +98,84 @@ class CSI_Camera:
         if self.video_capture != None:
             self.video_capture.release()
             self.video_capture = None
-        # Now kill the thread
         if self.read_thread != None:
             self.read_thread.join()
+
+    def log(self, tempObj):
+        filename = f"frame_{self.sensorID}_{tempObj.index}"
+        if tempObj.data_is_ok:
+            self.logger.writerow([
+                tempObj.index,
+                tempObj.time,
+                filename
+            ])
+        else:
+            self.logger.writerow([
+                tempObj.index,
+                tempObj.time,
+                "",
+            ])
+
+    def logP(self, log_buffer):
+        log_file = open(f'{os.getpid()}.csv', 'w', newline='')
+        file_header = ["index", "time", "imageName"]
+        logger = csv.writer(log_file)
+        logger.writerow(file_header)
+        while self.logObj.running.value or not log_buffer.empty():
+            try:
+                tempObj = log_buffer.get(0)
+                filename = f"{tempObj.source}/{tempObj.source}_{tempObj.index}.jpg"
+                logger.writerow([
+                    tempObj.index,
+                    tempObj.time,
+                    filename if tempObj.data_is_ok else None
+                ])
+            except RuntimeError:
+                print('[ERROR] Could not save an frame')
+            except queue.Empty:
+                pass
+        else:
+            log_file.close()
+            os.rename(f'{os.getpid()}.csv', f'{tempObj.source}.csv')
+            print(f"[OK] Process id: {self.logObj.name} has joined")
+
+    def video_writer(self, data_buffer, cap_size):
+        pWriter = cv2.VideoWriter(f'{os.getpid()}.mp4',
+                        0x7634706d,
+                        30,
+                        cap_size,
+                        )
+        with open(f'{os.getpid()}.txt', 'w') as f:
+            while self.writerObj.running.value or not data_buffer.empty():
+                try:
+                    if random.random() < .9:
+                        tempObj = data_buffer.get(0)
+                        if tempObj.data_is_ok:
+                            pWriter.write(tempObj.data)
+                            f.write(f'{tempObj.source}_{tempObj.index}\n')
+                except RuntimeError:
+                    print('[ERROR] Could not save an frame')
+                except queue.Empty:
+                    time.sleep(.01)
+            else:
+                pWriter.release()
+                print(f"[OK] Process id: {os.getpid()} has joined")
+
+    def image_writer(self, data_buffer):
+        while self.writerObj.running.value or not data_buffer.empty():
+            try:
+                if random.random() < .9:
+                    tempObj = data_buffer.get(0)
+                    if tempObj.data_is_ok:
+                        filename = f"{tempObj.source}/{tempObj.source}_{tempObj.index}.jpg"
+                        cv2.imwrite(filename, tempObj.data)
+            except RuntimeError:
+                print('[ERROR] Could not save an frame')
+            except queue.Empty:
+                time.sleep(.01)
+        else:
+            print(f"[OK] process id: {os.getpid()} has joined")
+
 
 
 """ 
@@ -197,6 +278,7 @@ def run_cameras():
         left_camera.release()
         right_camera.stop()
         right_camera.release()
+
 
 
 

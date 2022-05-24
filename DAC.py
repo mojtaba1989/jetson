@@ -1,5 +1,4 @@
 import copy
-import csv
 import logging
 import multiprocessing
 import os
@@ -8,27 +7,64 @@ import shutil
 import signal
 import sys
 import time
-from multiprocessing import Queue, Value
+from multiprocessing import Queue, Value, Array
 from time import strftime, localtime
+import threading
 
 import cv2
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
+
 
 from awr1642driver import awr1642
 from icm20948driver import IMU as imu
 from imx21983driver import CSI_Camera, gstreamer_pipeline
+from exceptions import *
+
+class HiddenPrints:
+    def __enter__(self):
+        self._original_stdout = sys.stdout
+        sys.stdout = open(os.devnull, 'w')
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout.close()
+        sys.stdout = self._original_stdout
+
+def blockPrinting(func):
+    def func_wrapper(*args, **kwargs):
+        # block all printing to the console
+        sys.stdout = open(os.devnull, 'w')
+        # call the method in question
+        value = func(*args, **kwargs)
+        # enable all printing to the console
+        sys.stdout = sys.__stdout__
+        # pass the return value of the method back
+        return value
+
+    return func_wrapper
 
 
-def get_ip():
+def get_ip(broadcast=False):
     import subprocess
     lst_txt = subprocess.check_output('ifconfig', shell=True).decode("utf-8").splitlines()
-    while True:
-        temp = lst_txt.pop(0)
-        if 'wlan' in temp:
-            temp = lst_txt.pop(0).split(' ')
-            break
-    return temp[9]
+    try:
+        while True:
+            temp = lst_txt.pop(0)
+            if 'wlan' in temp:
+                while True:
+                    temp = lst_txt.pop(0)
+                    if 'inet' in temp:
+                        temp = temp[temp.find('inet'):].split(' ')
+                        while True:
+                            ip = temp.pop(0)
+                            if '.' in ip:
+                                raise StopIteration
+    except StopIteration:
+        if broadcast:
+            ip = ip.split('.')
+            ip[-1] = '255'
+            ip = '.'.join(ip)
+        return ip
 
 class DelayedKeyboardInterrupt:
 
@@ -114,19 +150,11 @@ class sensor_read:
         self.config = [line.rstrip('\r\n') for line in open(self.configFileName)]
         self.configParameters = {}
         self.sampling = None
+        self.maxWait = None
         self.is_running = False
 
         # sensor objects
-        self.left_radar = None
-        self.right_radar = None
-        self.left_camera = None
-        self.right_camera = None
-        self.imu = None
-        self.writer = None
         self.sensorList = []
-
-        # sensor data object lists - CSV
-        self.csvBuffer = []
 
         # display setup
         self.display = 0
@@ -138,23 +166,14 @@ class sensor_read:
         self.saveCSV = 0
         self.saveIMG = 0
         self.index = 0
-        self.imgBuffer = Queue()
-        self.leftRadarWriter = None
-        self.rightRadarWriter = None
-        self.leftCameraWriter = None
-        self.rightCameraWriter = None
-        self.imuWriter = None
-        self.leftRadarFile = None
-        self.rightRadarFile = None
-        self.leftCameraFile = None
-        self.rightCameraFile = None
-        self.imuFile = None
         self.zip = None
-        self.ip_address = None
 
         # image postprocessing
-        self.camPars = self.stereoCalib()
-        self.getCamPars('params_py.xml', 'depth_pars.xml')
+        self.camPars = None
+
+        # Multiprocessor lists:
+        self.multiProcessorList = []
+        self.multiThreadingList = []
         print('[OK] Loading configuration is done')
 
     class objCreate:
@@ -168,11 +187,11 @@ class sensor_read:
             self.source = source
 
     class addProcessor:
-        def __init__(self, name, target, args, num_of_cores=2):
-            self.read_thread    = None
+        def __init__(self, name=None, target_function=None, args=None, num_of_cores=2):
             self.name           = name
             self.running        = Value('i', 0)
-            self.target         = target
+            self.buffer         = Queue()
+            self.target         = target_function
             self.args           = args
             self.num_of_cores   = num_of_cores
             self.jobs           = []
@@ -181,6 +200,7 @@ class sensor_read:
             self.running.value = 1
             for i in range(self.num_of_cores):
                 process = multiprocessing.Process(target=self.target, args=self.args)
+                process.daemon = True
                 self.jobs.append(process)
             for job in self.jobs:
                 job.start()
@@ -191,6 +211,26 @@ class sensor_read:
             for job in self.jobs:
                 if job.is_alive():
                     job.join()
+
+
+    class addThread:
+        def __init__(self, name, target):
+            self.read_thread    = None
+            self.read_lock      = threading.Lock()
+            self.name           = name
+            self.running        = False
+            self.target         = target
+
+        def start(self):
+            self.running = True
+            self.read_thread = threading.Thread(target=self.target)
+            print(f'[INFO] Parallel {self.name} status: {self.running}')
+            self.read_thread.start()
+
+        def stop(self):
+            self.running = False
+            self.read_thread.join()
+            self.read_thread = None
 
     class stereoCalib:
         def __init__(self):
@@ -211,200 +251,160 @@ class sensor_read:
             self.minDisparity = None
             self.stereo = None
 
-    def append(self, obj):
-        self.csvBuffer.append(obj)
-        if 'camera' in obj.source:
-            self.imgBuffer.put(copy.copy(obj))
-
-
-    def setDirectories(self):
+    def setDirectories(self, image=False):
         try:
             self.dirName = strftime("%d-%b-%Y-%H-%M", localtime())
             os.makedirs(self.dirName)
             self.dirPath += '/' + self.dirName
             os.chdir(self.dirPath)
-            if self.left_camera:
-                os.makedirs('./Figure-left-camera/')
-            if self.right_camera:
-                os.makedirs('./Figure-right-camera/')
+            if image:
+                for sensor in self.sensorList:
+                    if 'camera' in sensor.sensorID:
+                        os.makedirs(f'{sensor.sensorID}')
         except OSError:
             self.closeAll()
             sys.exit('[Error] Cannot make directories')
 
-    def setup(self):
+    @blockPrinting
+    def addCamera(self, config):
+        if int(config[1]):
+            sensor_id = f'camera{int(config[2])}'
+            sensor_obj = CSI_Camera(sensor_id)
+            with HiddenPrints():
+                sensor_obj.open(
+                    gstreamer_pipeline(
+                        sensor_id=int(config[3]),
+                        capture_width=int(config[4]),
+                        capture_height=int(config[5]),
+                        display_width=int(config[6]),
+                        display_height=int(config[7]),
+                        framerate=self.sampling if self.sampling else int(config[8]),
+                        flip_method=int(config[9]),
+                    )
+                )
+            return sensor_obj
+        else:
+            return None
+
+    def addRadar(self, config):
+        if int(config[1]):
+            sensor_id = f'radar{int(config[2])}'
+            sensor_obj = awr1642(
+                config[5],
+                config[3],
+                config[4],
+                sensor_id=sensor_id
+            )
+            sensor_obj.sensorSetup()
+            time.sleep(.01)
+            sensor_obj.open()
+            time.sleep(.01)
+            return sensor_obj
+        else:
+            return None
+
+    def addIMU(self, config):
+        if int(config[1]):
+            sensor_id = f'imu{int(config[2])}'
+            sensor_obj = imu(sensor_id=sensor_id)
+            sensor_obj.open()
+            return sensor_obj
+        else:
+            return None
+
+    def setup(self, demo_visualizer=False):
+        # refresh nvargus port
         try:
             os.system('sudo service nvargus-daemon stop')
             os.system('sudo service nvargus-daemon start')
         except:
             pass
+        # register sensors
         for i in self.config:
             splitWords = i.split(" ")
-            if "camera" in splitWords[0] and int(splitWords[1]):
-                if not int(splitWords[2]):
-                    self.left_camera = CSI_Camera('left_camera')
-                    self.left_camera.open(
-                        gstreamer_pipeline(
-                            sensor_id=int(splitWords[3]),
-                            capture_width=int(splitWords[4]),
-                            capture_height=int(splitWords[5]),
-                            display_width=int(splitWords[6]),
-                            display_height=int(splitWords[7]),
-                            framerate=self.sampling if self.sampling
-                            else int(splitWords[8]),
-                            flip_method=int(splitWords[9]),
-                        )
-                    )
-                    self.sensorList.append(self.left_camera)
+            if "camera" in splitWords[0]:
+                temp = self.addCamera(splitWords)
+                if temp:
+                    self.sensorList.append(temp)
                     self.blankImg = cv2.resize(
                         self.blankImg,
                         (int(splitWords[6]),
                          int(splitWords[7])),
                         interpolation=cv2.INTER_AREA
                     )
-                    self.blankImgShape = self.blankImg.shape
-                else:
-                    self.right_camera = CSI_Camera('right_camera')
-                    self.right_camera.open(
-                        gstreamer_pipeline(
-                            sensor_id=int(splitWords[3]),
-                            capture_width=int(splitWords[4]),
-                            capture_height=int(splitWords[5]),
-                            display_width=int(splitWords[6]),
-                            display_height=int(splitWords[7]),
-                            framerate=self.sampling if self.sampling
-                            else int(splitWords[8]),
-                            flip_method=int(splitWords[9]),
-                        )
-                    )
-                    self.sensorList.append(self.right_camera)
-                    self.blankImg = cv2.resize(
-                        self.blankImg,
-                        (int(splitWords[6]),
-                         int(splitWords[7])),
-                        interpolation=cv2.INTER_AREA
-                    )
-                    self.blankImgShape = self.blankImg.shape
-            elif "radar" in splitWords[0] and int(splitWords[1]):
-                if not int(splitWords[2]):
-                    self.left_radar = awr1642(
-                        splitWords[5],
-                        splitWords[3],
-                        splitWords[4],
-                        'left_radar'
-                    )
-                    self.left_radar.sensorSetup()
-                    time.sleep(.01)
-                    if self.sampling:
-                        self.left_radar.setSampleRate(self.sampling)
-                        time.sleep(.01)
-                    self.left_radar.open()
-                    time.sleep(.01)
-                    self.sensorList.append(self.left_radar)
-                else:
-                    self.right_radar = awr1642(
-                        splitWords[5],
-                        splitWords[3],
-                        splitWords[4],
-                        'right_radar'
-                    )
-                    self.right_radar.sensorSetup()
-                    time.sleep(.01)
-                    if self.sampling:
-                        self.right_radar.setSampleRate(self.sampling)
-                        time.sleep(.01)
-                    self.right_radar.open()
-                    time.sleep(.01)
-                    self.sensorList.append(self.right_radar)
-            elif "imu" in splitWords[0] and int(splitWords[1]):
-                self.imu = imu("imu")
-                self.imu.open()
-                self.sensorList.append(self.imu)
-            elif "output" in splitWords[0]:
-                self.saveIMG = int(splitWords[1])
-                self.saveCSV = int(splitWords[1])
-                if self.saveCSV:
-                    self.setDirectories()
-                    radar_header = ["index", "time", "x", "y", "range", "peakVal", "doppler"]
-                    camera_header = ["index", "time", "imageName"]
-                    imu_header = ["index", "time", "x", "y", "z", "ax", "ay", "az", "gx", "gy", "gz"]
-                    if self.left_radar:
-                        self.leftRadarFile = open(self.dirPath+'/'+self.dirName+'left-radar.csv', 'w', newline='')
-                        self.leftRadarWriter = csv.writer(self.leftRadarFile)
-                        self.leftRadarWriter.writerow(radar_header)
-                    if self.right_radar:
-                        self.rightRadarFile = open(self.dirPath+'/'+self.dirName+'right-radar.csv', 'w', newline='')
-                        self.rightRadarWriter = csv.writer(self.rightRadarFile)
-                        self.rightRadarWriter.writerow(radar_header)
-                    if self.left_camera:
-                        self.leftCameraFile = open(self.dirPath+'/'+self.dirName+'left-camera.csv', 'w', newline='')
-                        self.leftCameraWriter = csv.writer(self.leftCameraFile)
-                        self.leftCameraWriter.writerow(camera_header)
-                    if self.right_camera:
-                        self.rightCameraFile = open(self.dirPath+'/'+self.dirName+'right-camera.csv', 'w', newline='')
-                        self.rightCameraWriter = csv.writer(self.rightCameraFile)
-                        self.rightCameraWriter.writerow(camera_header)
-                    if self.imu:
-                        self.imuFile = open(self.dirPath+'/'+self.dirName+'imu.csv', 'w', newline='')
-                        self.imuWriter = csv.writer(self.imuFile)
-                        self.imuWriter.writerow(imu_header)
-                    self.saveIMG = self.addProcessor('saving', target=self.imgWriter, args=(self.imgBuffer,), num_of_cores=4)
-                self.display = int(splitWords[2])
-                if self.display:
-                    self.displayMethod = 'scatter' if int(splitWords[3]) else 'heatmap'
-                self.zip = int(splitWords[4])
-                self.ip_address = int(splitWords[5])
+                    self.blankImgShape = (self.blankImg.shape[1], self.blankImg.shape[0])
+                    temp.blankImg = self.blankImg
+            elif "radar" in splitWords[0] and not demo_visualizer:
+                temp = self.addRadar(splitWords)
+                if temp:
+                    self.sensorList.append(temp)
+            elif "imu" in splitWords[0] and not demo_visualizer:
+                temp = self.addIMU(splitWords)
+                if temp:
+                    self.sensorList.append(temp)
+            elif "output" in splitWords[0] and not demo_visualizer:
+                if int(splitWords[1]):
+                    self.setDirectories(image=int(splitWords[3]))
+                    for sensor in self.sensorList:
+                        sensor.logObj = self.addProcessor()
+                        sensor.logObj.name = f'logger_dev_{sensor.sensorID}'
+                        sensor.logObj.target = sensor.logP
+                        sensor.logObj.args = (sensor.logObj.buffer, )
+                        sensor.logObj.num_of_cores = 1
+                        self.multiProcessorList.append(sensor.logObj)
+                        if 'camera' in sensor.sensorID:
+                            processor_name = f'img_writer_dev_{sensor.sensorID}'
+                            if int(splitWords[3]):
+                                sensor.writerObj = self.addProcessor()
+                                sensor.writerObj.name = processor_name
+                                sensor.writerObj.target = sensor.image_writer
+                                sensor.writerObj.args = (sensor.writerObj.buffer, )
+                                sensor.writerObj.num_of_cores = int(splitWords[4])
+                            else:
+                                cap_size = Array('i', self.blankImgShape)
+                                sensor.writerObj = self.addProcessor()
+                                sensor.writerObj.name = processor_name
+                                sensor.writerObj.target = sensor.video_writer
+                                sensor.writerObj.args = (sensor.writerObj.buffer, cap_size)
+                                sensor.writerObj.num_of_cores = int(splitWords[4])
+                            self.multiProcessorList.append(sensor.writerObj)
+                    self.zip = int(splitWords[2])
             elif "sampling" in splitWords[0] and int(splitWords[1]):
-                self.sampling = float(splitWords[2])
+                if not demo_visualizer:
+                    self.sampling = float(splitWords[2])
+                    self.maxWait = 1/self.sampling
+                else:
+                    self.sampling = 30
+                    self.maxWait = 1/self.sampling
 
     def closeAll(self):
-        for obj in [self.left_radar, self.right_radar]:
-            try:
-                obj.close()
-            except Exception as error:
-                print(error)
-                continue
-        for obj in [self.left_camera, self.right_camera]:
-            try:
-                obj.stop()
-                obj.release()
-            except Exception as error:
-                print(error)
-                continue
-        if self.saveIMG:
-            self.saveIMG.running.value = 0
-        self.saveIMG = None
-        if self.leftRadarFile:
-            self.leftRadarFile.close()
-        if self.rightRadarFile:
-            self.rightRadarFile.close()
-        if self.leftCameraFile:
-            self.leftCameraFile.close()
-        if self.rightCameraFile:
-            self.rightCameraFile.close()
-        if self.imuFile:
-            self.imuFile.close()
+        for sensor in self.sensorList:
+            sensor.stop()
+        for thread in self.multiThreadingList:
+            thread.stop()
+        for processor in self.multiProcessorList:
+            processor.stop()
         try:
             cv2.destroyAllWindows()
         except:
             pass
         if self.zip:
+            print('[Waiting] Zipping ....')
             os.chdir('..')
             shutil.make_archive(self.dirName, 'zip', self.dirName)
-        if self.ip_address:
+            print('[OK] Zip file is ready')
+            print('[INFO] Command to download the zip file via SSH: (replace ~ with destination)')
             print(f"scp jetson@{get_ip()}:{os.getcwd()}/{self.dirName}.zip ~")
 
-
-
     def loopCycleControl(self, start_time, sleep_enable=1):
+        dT = time.time()-start_time
         if sleep_enable:
-            if time.time()-start_time < 1/self.sampling:
-                time.sleep(1/self.sampling +
-                           start_time -time.time())
-                print(f"\r[INFO] Actual rate:{int(1/(time.time()-start_time))} - Buffer length: {self.imgBuffer.qsize()}              ", end="")
-            elif time.time()-start_time > 1/self.sampling:
-                print("\r[WARNING] High sampling rate - Actual rate:%d" % int(1/(time.time()-start_time)), end="")
-                time.sleep(0.001)
-                print("", end='\r')
+            if dT < self.maxWait:
+                time.sleep(self.maxWait-dT)
+            buffer_size = sum([p.args[0].qsize() for p in self.multiProcessorList])
+            print(f"\r[INFO] Actual rate:{min([1/dT, self.sampling]):5.2f} - Buffer length: {buffer_size:03d}", end="")
+            if buffer_size > 200:
+                raise LargeBuffer
         else:
             if time.time()-start_time < 1/self.sampling:
                 cv2.waitKey((1/self.sampling + start_time - time.time()) * 1000)
@@ -424,85 +424,36 @@ class sensor_read:
                 data,
                 grabbed,
                 sensor.sensorID)
-            self.append(tempObj)
+            sensor.logObj.buffer.put(tempObj)
+            if 'camera' in sensor.sensorID:
+                sensor.writerObj.buffer.put(copy.copy(tempObj))
 
     def csvWriter(self):
-        try:
-            while True:
-                tempObj = self.csvBuffer.pop(0)
-                if 'radar' in tempObj.source:
-                    writer = self.leftRadarWriter if 'left' in tempObj.source else self.rightRadarWriter
-                    if tempObj.data_is_ok:
-                        writer.writerow([
-                            tempObj.index,
-                            tempObj.time,
-                            tempObj.data["x"],
-                            tempObj.data["y"],
-                            tempObj.data["peakVal"],
-                            tempObj.data["doppler"],
-                        ])
-                    else:
-                        writer.writerow([
-                            tempObj.index,
-                            tempObj.time,
-                            "", "", "", ""])
-                elif 'camera' in tempObj.source:
-                    writer = self.leftCameraWriter if 'left' in tempObj.source else self.rightCameraWriter
-                    filename = "Figure-left-camera/img_left_%d.jpg" % tempObj.index if 'left' in tempObj.source else "Figure-right-camera/img_right_%d.jpg" % tempObj.index
-                    if tempObj.data_is_ok:
-                        writer.writerow([
-                            tempObj.index,
-                            tempObj.time,
-                            filename
-                        ])
-                    else:
-                        writer.writerow([
-                            tempObj.index,
-                            tempObj.time,
-                            "",
-                        ])
-                elif 'imu' in tempObj.source:
-                    writer = self.imuWriter
-                    if tempObj.data_is_ok:
-                        writer.writerow([
-                            tempObj.index,
-                            tempObj.time,
-                            tempObj.data[0],
-                            tempObj.data[1],
-                            tempObj.data[2],
-                            tempObj.data[3],
-                            tempObj.data[4],
-                            tempObj.data[5],
-                            tempObj.data[6],
-                            tempObj.data[7],
-                            tempObj.data[8],
-                        ])
-                    else:
-                        writer.writerow([
-                            tempObj.index,
-                            tempObj.time,
-                            "", "", "", "", "", "", "", "", "",
-                        ])
-        except IndexError:
-            pass
-        except KeyboardInterrupt:
-            pass
+        while self.is_running:
+            try:
+                for sensor in self.sensorList:
+                    with self.saveCSV.read_lock:
+                        sensor.write(sensor.output_buffer.pop(0))
+            except IndexError:
+                pass
+        else:
+            print(f"[OK] Thread id: {self.saveCSV.name} has joined")
+
+
 
     def imgWriter(self, data_buffer):
         while self.saveIMG.running.value or not data_buffer.empty():
-            if not self.saveIMG.running.value:
-                print(f'\r[INFO] Remained images to save : {data_buffer.qsize()}', end='')
             try:
                 tempObj = data_buffer.get(0)
                 if tempObj.data_is_ok:
-                    filename = f"Figure-left-camera/img_left_{tempObj.index}.jpg" if 'left' in tempObj.source else f"Figure-right-camera/img_right_{tempObj.index}.jpg"
+                    filename = f"Image-{tempObj.source}/img_{tempObj.source}_{tempObj.index}.jpg"
                     cv2.imwrite(filename, tempObj.data)
             except RuntimeError:
-                print('[ERROR] Could not save an image')
+                print('[ERROR] Could not save an video')
             except queue.Empty:
                 pass
         else:
-            print(f"[INFO] process id: {os.getpid()} has joined\n")
+            print(f"[OK] process id: {os.getpid()} has joined")
 
     def displayAll(self, start_time, window_title):
         if self.left_camera:
@@ -533,7 +484,7 @@ class sensor_read:
                 plt.xlim([-5, 5])
                 plt.ylim([0, 5])
                 plt.savefig('imgl.png')
-                plt.close()
+                plt.stop()
                 img = cv2.imread('imgl.png')
             else:
                 img = heatmap(x, y, z, (-2, 2), (0, 4))
@@ -551,7 +502,7 @@ class sensor_read:
                 plt.xlim([-5, 5])
                 plt.ylim([0, 5])
                 plt.savefig('imgl.png')
-                plt.close()
+                plt.stop()
                 img = cv2.imread('imgl.png')
             else:
                 img = heatmap(x, y, z, (-2, 2), (0, 4))
@@ -567,49 +518,94 @@ class sensor_read:
         self.loopCycleControl(start_time, sleep_enable=0)
 
     def run(self):
-        if self.saveIMG:
+        self.is_running = True
+        if all([sensor.sensorIsReady for sensor in self.sensorList]):
             with DelayedKeyboardInterrupt():
-                self.saveIMG.start()
-        for sensor in self.sensorList:
-            sensor.start()
-            print(sensor, sensor.sensorID, sensor.isOpened)
-        if self.sensorList \
-                and all([sensor.isOpened for sensor in self.sensorList]):
-            print('[INFO] Recording...')
-            self.is_running = True
-            if not self.display:
+                for processor in self.multiProcessorList:
+                    processor.start()
+            for thread in self.multiThreadingList:
+                thread.start()
+            for sensor in self.sensorList:
+                sensor.start()
+                print(sensor, sensor.sensorID, sensor.isOpened)
+            if self.sensorList \
+                    and all([sensor.isOpened for sensor in self.sensorList]):
+                print('[INFO] Recording...')
                 while self.is_running:
                     try:
                         start_time = time.time()
                         self.readAll()
-                        self.csvWriter()
                         self.loopCycleControl(start_time)
                         self.index += 1
                     except KeyboardInterrupt:
                         self.is_running = False
                         pass
+                    except LargeBuffer:
+                        pass
                 else:
-                    print("\n Capture disrupted")
-                    print(f"[INFO] Estimated buffer size :{self.imgBuffer.qsize()}\n", end="")
+                    print("\nCapture disrupted")
+                    buffersize = sum([p.args[0].qsize() for p in self.multiProcessorList])
+                    print(f"[INFO] Estimated buffer size :{buffersize}")
                     self.closeAll()
             else:
-                window_title = "Data Acquisition "
-                cv2.namedWindow(window_title, cv2.WINDOW_AUTOSIZE)
-                try:
-                    while True:
-                        start_time = time.time()
-                        self.readAll()
-                        self.displayAll(start_time, window_title)
-                        self.index += 1
-                except KeyboardInterrupt:
-                    print("\n Capture disrupted")
-                    time.sleep(3)
-                    self.closeAll()
-                    cv2.destroyAllWindows()
-                    time.sleep(3)
+                print("[ERROR] Not all sensors have been opened correctly")
+                self.closeAll()
         else:
             print("[ERROR] Not all sensors have been opened correctly")
-            self.closeAll()
+            for sensor in self.sensorList:
+                print(sensor, sensor.sensorID, sensor.sensorIsReady)
+
+    def run_demo(self):
+        self.camPars = self.stereoCalib()
+        self.getCamPars('params_py.xml', 'depth_pars.xml')
+        (width, height) = (480, 270)
+        self.is_running = True
+        if all([sensor.sensorIsReady for sensor in self.sensorList]):
+            with DelayedKeyboardInterrupt():
+                for processor in self.multiProcessorList:
+                    processor.start()
+            for thread in self.multiThreadingList:
+                thread.start()
+            for sensor in self.sensorList:
+                sensor.start()
+                print(sensor, sensor.sensorID, sensor.isOpened)
+            gst_out = f"appsrc ! video/x-raw, format=BGR ! queue ! videoconvert ! video/x-raw,format=BGRx ! nvvidconv ! omxh264enc insert-sps-pps=true ! h264parse ! rtph264pay pt=96 ! queue ! application/x-rtp, media=video, encoding-name=H264 ! udpsink host={get_ip(broadcast=True)} port=5000"
+            print(f'[INFO] GSTREAMER {gst_out}')
+            streamer = cv2.VideoWriter(gst_out, cv2.CAP_GSTREAMER, 0, float(25), (2 * width, height))
+            print('[INFO] Socket has been created...')
+            if self.sensorList \
+                    and all([sensor.isOpened for sensor in self.sensorList]):
+                print('[INFO] Streaming...')
+                frame = cv2.resize(self.blankImg, (width, height))
+                while self.is_running:
+                    tstart = time.time()
+                    try:
+                        for sensor in self.sensorList:
+                            if 'camera0' in sensor.sensorID:
+                                grabbed0, data0, time_stamp = sensor.read()
+                                if not grabbed0:
+                                    data0 = self.blankImg
+                            elif 'camera1' in sensor.sensorID:
+                                grabbed1, data1, time_stamp = sensor.read()
+                                if not grabbed1:
+                                    data1 = self.blankImg
+                        frame = np.hstack((data0, data1))
+                        streamer.write(cv2.resize(frame, (2 * width, height)))
+                        time.sleep(max([0, 1/25-time.time()+tstart]))
+                    except KeyboardInterrupt:
+                        self.is_running = False
+                        streamer.release()
+                        pass
+                else:
+                    print("\nStreaming Interrupt")
+                    self.closeAll()
+            else:
+                print("[ERROR] Not all sensors have been opened correctly")
+                self.closeAll()
+        else:
+            print("[ERROR] Not all sensors have been opened correctly")
+            for sensor in self.sensorList:
+                print(sensor, sensor.sensorID, sensor.sensorIsReady)
 
     def getCamPars(self, path_to_calib_xml, path_to_depth_xml):
         cv_file = cv2.FileStorage(path_to_calib_xml, cv2.FILE_STORAGE_READ)
@@ -665,88 +661,18 @@ class sensor_read:
             )
         return img_out
 
-    def left_camera_postprocess(self):
-        while self.left_camera.running:
-            try:
-                if self.left_camera.postprocess.new_data and not self.left_camera.postprocess.processed:
-                    with self.left_camera.postprocess.read_lock:
-                        img = self.left_camera.postprocess.data.copy()
-                    img = self.camCalib(img, 'left')
-                    with self.left_camera.postprocess.read_lock:
-                        self.left_camera_output = img
-                        self.left_camera.postprocess.processed = True
-                        self.left_camera.postprocess.new_data = False
-            except:
-                print('[ERROR] Left camera post processing failed')
-
-    def right_camera_postprocess(self):
-        while self.right_camera.running:
-            try:
-                if self.right_camera.postprocess.new_data and not self.right_camera.postprocess.processed:
-                    with self.right_camera.postprocess.read_lock:
-                        img = self.right_camera.postprocess.data.copy()
-                    img = self.camCalib(img, 'right')
-                    with self.right_camera.postprocess.read_lock:
-                        self.right_camera_output= img # post porcessed
-                        self.right_camera.postprocess.processed = True
-                        self.right_camera.postprocess.new_data = False
-            except:
-                print('[ERROR] Right camera post processing failed')
-
-    def left_radar_postprocess(self):
-        while self.left_radar.running:
-            if self.left_radar.postprocess.new_data and not self.left_radar.postprocess.processed:
-                # process on new data
-                with self.left_radar.postprocess.read_lock:
-                    data = self.left_radar.postprocess.data.copy()
-                x = data["x"]
-                y = data["y"]
-                z = data["peakVal"]
-                if self.displayMethod == 'scatter':
-                    plt.scatter(x, y, s=50, c=z, cmap='gray')
-                    plt.xlim([-5, 5])
-                    plt.ylim([0, 5])
-                    plt.savefig('imgl.png')
-                    plt.close()
-                    img = cv2.imread('imgl.png')
-                else:
-                    img = heatmap(x, y, z, (-2, 2), (0, 4))
-                img = cv2.resize(img,
-                                 (self.blankImgShape[1], self.blankImgShape[0]),
-                                 interpolation=cv2.INTER_AREA)
-                with self.left_radar.postprocess.read_lock:
-                    self.left_radar_output = img # post porcessed
-                self.left_radar.postprocess.processed = True
-                self.left_radar.postprocess.new_data = False
-
-    def right_radar_postprocess(self):
-        while self.right_radar.running:
-            if self.right_radar.postprocess.new_data and not self.right_radar.postprocess.processed:
-                # process on new data
-                with self.right_radar.postprocess.read_lock:
-                    data = self.right_radar.postprocess.data.copy()
-                x = data["x"]
-                y = data["y"]
-                z = data["peakVal"]
-                if self.displayMethod == 'scatter':
-                    plt.scatter(x, y, s=50, c=z, cmap='gray')
-                    plt.xlim([-5, 5])
-                    plt.ylim([0, 5])
-                    plt.savefig('imgr.png')
-                    plt.close()
-                    img = cv2.imread('imgr.png')
-                else:
-                    img = heatmap(x, y, z, (-2, 2), (0, 4))
-                img = cv2.resize(img,
-                                 (self.blankImgShape[1], self.blankImgShape[0]),
-                                 interpolation=cv2.INTER_AREA)
-                with self.right_radar.postprocess.read_lock:
-                    self.right_radar_output = img # post porcessed
-                self.right_radar.postprocess.processed = True
-                self.right_radar.postprocess.new_data = False
-
 if __name__ == "__main__":
+    demo = False
+    for idx, arg in enumerate(sys.argv):
+        if arg in ['--demo', '-d']:
+            demo = True
     target = sensor_read("dacProfile.cfg")
-    target.setup()
-    target.run()
+    if not demo:
+        target.setup()
+        target.run()
+    else:
+        target.setup(demo_visualizer=True)
+        target.run_demo()
+
+
 
